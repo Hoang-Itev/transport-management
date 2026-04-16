@@ -4,8 +4,8 @@ import { Tag } from 'antd';
 const StatusTag = ({ status }) => {
   const statusMap = {
     // Khách hàng
-    1: { color: 'success', text: 'Đang hợp tác' },
-    0: { color: 'default', text: 'Ngừng hợp tác' },
+    1: { color: 'success', text: 'Đang hoạt động' },
+    0: { color: 'default', text: 'Ngừng hoạt động' },
     // Báo giá
     DRAFT: { color: 'default', text: 'DRAFT' },
     SENT: { color: 'processing', text: 'SENT' },

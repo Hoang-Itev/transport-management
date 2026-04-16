@@ -2,7 +2,8 @@ const db = require('../config/database');
 
 const CongNo = {
   // GET /cong-no — danh sách tổng hợp
-  findAll: async ({ page = 1, limit = 20, quaHan, nguoiTaoId }) => {
+  // FIX 1: Thêm tham số 'search' vào hàm nhận
+  findAll: async ({ page = 1, limit = 20, quaHan, nguoiTaoId, search }) => {
     const offset = (page - 1) * limit;
 
     let baseQuery = `
@@ -10,6 +11,12 @@ const CongNo = {
       WHERE kh.is_active = TRUE
     `;
     const params = [];
+
+    // FIX 2: Bổ sung logic lọc theo Tên công ty nếu có search
+    if (search) {
+      baseQuery += ` AND kh.ten_cong_ty LIKE ? `;
+      params.push(`%${search}%`);
+    }
 
     if (nguoiTaoId) {
       baseQuery += `
@@ -22,8 +29,8 @@ const CongNo = {
       params.push(nguoiTaoId);
     }
 
-    // FIX 1: Đẩy điều kiện lọc quá hạn vào thẳng SQL để không vỡ Phân trang (Pagination)
-    if (quaHan === 'true') {
+    // Đẩy điều kiện lọc quá hạn vào thẳng SQL
+    if (quaHan === 'true' || quaHan === true) {
       baseQuery += `
         AND EXISTS (
           SELECT 1 FROM van_dons vd
@@ -37,7 +44,6 @@ const CongNo = {
       `;
     }
 
-    // FIX 2: Thêm cờ isQuaHan để check xem khách này có hóa đơn nào bị lố ngày không
     const selectQuery = `
       SELECT
         kh.id            AS khachHangId,
@@ -93,7 +99,7 @@ const CongNo = {
         congNoHienTai,
         conLaiDuocPhepNo: hanMucCongNo - congNoHienTai,
         soVanDonChuaTT:   Number(row.soVanDonChuaTT),
-        isQuaHan:         row.isQuaHan === 1 // Đã check đúng bản chất quá hạn
+        isQuaHan:         row.isQuaHan === 1 
       };
     });
 
@@ -153,7 +159,6 @@ const CongNo = {
       [khachHangId, today]
     );
 
-    // FIX 3: Tối ưu lịch sử thanh toán, bỏ JOIN rườm rà gây duplicate (nhân bản) dòng
     const [lichSu] = await db.query(
       `SELECT
         pt.id         AS maPhieuThu,

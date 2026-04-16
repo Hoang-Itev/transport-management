@@ -83,7 +83,7 @@ const AppSider = ({ collapsed }) => {
   return (
     <Sider trigger={null} collapsible collapsed={collapsed} theme="dark" width={240}>
       <div style={{ height: 32, margin: 16, background: 'rgba(255, 255, 255, 0.2)', borderRadius: 6, display: 'flex', justifyContent: 'center', alignItems: 'center', color: 'white', fontWeight: 'bold', overflow: 'hidden' }}>
-        {collapsed ? 'LOGI' : 'LOGISTICS PRO'}
+        {collapsed ? 'LOGI' : 'LOGISTICS'}
       </div>
       <Menu
         theme="dark"

@@ -10,7 +10,7 @@ const { TextArea } = Input;
 const KhachHangForm = () => {
   const [form] = Form.useForm();
   const navigate = useNavigate();
-  const { id } = useParams(); // Lấy ID từ URL
+  const { id } = useParams();
   const isEdit = !!id;
 
   const [loading, setLoading] = useState(false);
@@ -27,7 +27,6 @@ const KhachHangForm = () => {
       const res = await khachHangService.getById(id);
       if (res.success) {
         const d = res.data;
-        // Map dữ liệu snake_case từ BE sang camelCase cho Form
         form.setFieldsValue({
           tenCongTy: d.ten_cong_ty,
           maSoThue: d.ma_so_thue,
@@ -60,7 +59,6 @@ const KhachHangForm = () => {
       }
       navigate('/khach-hang');
     } catch (error) {
-      // Bắt lỗi trùng MST từ Database
       if (error?.error?.message?.includes('Duplicate') || error?.error?.code === 'ER_DUP_ENTRY') {
         message.error('Mã số thuế này đã tồn tại trong hệ thống!');
       } else {
@@ -86,7 +84,8 @@ const KhachHangForm = () => {
         form={form}
         layout="vertical"
         onFinish={onFinish}
-        initialValues={{ hanMucCongNo: 0, kyHanThanhToan: 30 }}
+        // FIX 1: Đặt mặc định hạn mức công nợ là 50 triệu thay vì 0
+        initialValues={{ hanMucCongNo: 50000000, kyHanThanhToan: 30 }}
       >
         <Row gutter={24}>
           <Col span={12}>

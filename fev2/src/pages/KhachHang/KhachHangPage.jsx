@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Input, Select, Button, Table, Space, Typography, message, Modal } from 'antd';
-import { SearchOutlined, PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
+import { Card, Input, Select, Button, Table, Space, Typography, message, Modal, Tag } from 'antd'; // FIX 2: Import thêm Tag
+import { SearchOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { khachHangService } from '../../services/khachHangService';
 import { usePagination } from '../../hooks/usePagination';
 import CurrencyText from '../../components/common/CurrencyText';
-import StatusTag from '../../components/common/StatusTag';
 import { useAuth } from '../../hooks/useAuth';
 
 const { Title } = Typography;
@@ -105,7 +104,12 @@ const KhachHangPage = () => {
       dataIndex: 'is_active',
       key: 'isActive',
       align: 'center',
-      render: (val) => <StatusTag active={val} />
+      // FIX 2: Bỏ gọi StatusTag, dùng Tag trực tiếp để xử lý dữ liệu 1/0
+      render: (val) => (
+        val === 1 || val === true 
+          ? <Tag color="success">Đang hợp tác</Tag> 
+          : <Tag color="default">Ngừng hợp tác</Tag>
+      )
     },
     {
       title: 'Thao tác',
@@ -119,7 +123,7 @@ const KhachHangPage = () => {
             onClick={() => navigate(`/khach-hang/${record.id}/sua`)}
             title="Sửa / Xem chi tiết"
           />
-          {user?.vaiTro === 'MANAGER' && record.is_active === 1 && (
+          {user?.vaiTro === 'MANAGER' && (record.is_active === 1 || record.is_active === true) && (
             <Button 
               type="text" 
               danger 

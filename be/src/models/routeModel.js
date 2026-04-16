@@ -70,22 +70,15 @@ const Route = {
     return true;
   },
 
+  // FIX LỖI: Vô hiệu hóa dây chuyền Tuyến đường -> Bảng giá cước
   softDelete: async (id) => {
+    // 1. Ngưng hoạt động Tuyến đường
     await db.query(`UPDATE tuyen_duongs SET is_active = 0 WHERE id = ?`, [id]);
+    
+    // 2. Ngưng hoạt động toàn bộ Bảng giá cước có chứa tuyến đường này
+    await db.query(`UPDATE bang_gia_cuocs SET is_active = 0 WHERE tuyen_duong_id = ?`, [id]);
+    
     return true;
-  },
-
-  // Kiểm tra xem tuyến đường có đang nằm trong bảng giá nào không
-  checkInUse: async (routeId) => {
-    try {
-      const [rows] = await db.query(
-        `SELECT COUNT(*) as count FROM bang_gias WHERE tuyen_duong_id = ? AND is_active = 1`,
-        [routeId]
-      );
-      return rows[0].count > 0;
-    } catch (err) {
-      return false;
-    }
   }
 };
 

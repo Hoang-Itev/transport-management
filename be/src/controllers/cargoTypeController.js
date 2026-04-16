@@ -22,7 +22,6 @@ const createCargoType = async (req, res) => {
     const id = await CargoType.create({ ten, moTa });
     res.status(201).json({ success: true, message: 'Thêm loại hàng thành công', data: { id } });
   } catch (error) {
-    // Bắt lỗi trùng tên nếu bạn đã set UNIQUE cho cột 'ten' trong MySQL
     if (error.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ success: false, error: { message: 'Tên loại hàng đã tồn tại' } });
     }
@@ -57,17 +56,9 @@ const deleteCargoType = async (req, res) => {
       return res.status(404).json({ success: false, error: { message: 'Không tìm thấy loại hàng' } });
     }
 
-    // Nghiệp vụ: Chặn xóa nếu có Bảng giá đang sử dụng
-    const isUsed = await CargoType.checkInUse(id);
-    if (isUsed) {
-      return res.status(422).json({ 
-        success: false, 
-        error: { code: 'DANH_MUC_DANG_DUOC_SU_DUNG', message: 'Không thể xóa! Loại hàng này đang được sử dụng trong một Bảng giá đang hoạt động.' } 
-      });
-    }
-
+    // Đã thay đổi logic: Tiến hành "softDelete" thẳng tay thay vì block
     await CargoType.softDelete(id);
-    res.json({ success: true, message: 'Đã vô hiệu hóa loại hàng thành công' });
+    res.json({ success: true, message: 'Đã vô hiệu hóa loại hàng và các bảng giá liên quan thành công' });
   } catch (error) {
     res.status(500).json({ success: false, error: { message: error.message } });
   }

@@ -47,8 +47,7 @@ const Pricing = {
     return rows[0];
   },
 
-  // ⚠️ NGHIỆP VỤ LÕI: Kiểm tra trùng lặp Bảng giá (Overlap)
-  // Trùng khi: Cùng Tuyến + Cùng Loại Hàng + Giao nhau về Trọng lượng + Giao nhau về Ngày
+  // FIX LỖI TRÙNG KG TẠI ĐÂY: Xử lý triệt để biến ngayHetHan bị NULL truyền từ Client lên
   checkOverlap: async (tuyenDuongId, loaiHangId, kgTu, kgDen, ngayApDung, ngayHetHan, excludeId = null) => {
     let query = `
       SELECT id FROM bang_gia_cuocs 
@@ -56,7 +55,7 @@ const Pricing = {
         AND loai_hang_id = ? 
         AND is_active = 1
         AND (? <= kg_den AND ? >= kg_tu)
-        AND (? <= COALESCE(ngay_het_han, '2099-12-31') AND ? >= ngay_ap_dung)
+        AND (? <= COALESCE(ngay_het_han, '2099-12-31') AND COALESCE(?, '2099-12-31') >= ngay_ap_dung)
     `;
     const params = [tuyenDuongId, loaiHangId, kgTu, kgDen, ngayApDung, ngayHetHan];
 
@@ -69,7 +68,6 @@ const Pricing = {
     return rows.length > 0; // Trả về true nếu bị trùng
   },
 
-  // ⚠️ NGHIỆP VỤ LÕI: Tra cứu giá cho Vận đơn/Báo giá
   lookupPrice: async (tuyenDuongId, loaiHangId, trongLuong) => {
     const [rows] = await db.query(
       `SELECT don_gia as donGia, kg_tu as kgTu, kg_den as kgDen, ngay_ap_dung as ngayApDung 

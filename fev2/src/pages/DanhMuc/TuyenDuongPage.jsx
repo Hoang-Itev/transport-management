@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, Input, Space, Typography, Modal, Form, InputNumber, message } from 'antd';
+import { Card, Table, Button, Input, Space, Typography, Modal, Form, InputNumber, message, Tag } from 'antd'; // Thêm Tag
 import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import { danhMucService } from '../../services/danhMucService';
 import { usePagination } from '../../hooks/usePagination';
-import StatusTag from '../../components/common/StatusTag';
 
 const { Title } = Typography;
 
@@ -45,9 +44,11 @@ const TuyenDuongPage = () => {
 
   const handleDelete = (id) => {
     Modal.confirm({
-      title: 'Xóa tuyến đường?', okType: 'danger',
+      title: 'Xóa tuyến đường?', 
+      content: 'Tuyến đường sẽ được chuyển sang trạng thái ngưng hoạt động.',
+      okType: 'danger',
       onOk: async () => {
-        try { await danhMucService.deleteTuyenDuong(id); message.success('Đã xóa'); fetchData(); } 
+        try { await danhMucService.deleteTuyenDuong(id); message.success('Đã ngưng hoạt động'); fetchData(); } 
         catch (error) { message.error('Dữ liệu đang được sử dụng!'); }
       }
     });
@@ -58,11 +59,22 @@ const TuyenDuongPage = () => {
     { title: 'Tỉnh đi', dataIndex: 'tinh_di' },
     { title: 'Tỉnh đến', dataIndex: 'tinh_den' },
     { title: 'Khoảng cách (km)', dataIndex: 'km', align: 'right' },
-    { title: 'Trạng thái', dataIndex: 'is_active', render: val => <StatusTag status={val} />, width: 150 },
+    { 
+      title: 'Trạng thái', 
+      dataIndex: 'is_active', 
+      width: 150,
+      align: 'center',
+      // FIX: Hiển thị chữ "Ngưng hoạt động" chuẩn xác
+      render: (val) => (val === 1 || val === true) 
+        ? <Tag color="success">Đang hoạt động</Tag> 
+        : <Tag color="default">Ngưng hoạt động</Tag>
+    },
     { title: 'Thao tác', align: 'center', render: (_, record) => (
         <Space>
           <Button type="text" icon={<EditOutlined style={{ color: '#fa8c16' }}/>} onClick={() => openModal(record)} />
-          {record.is_active === 1 && <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDelete(record.id)} />}
+          {(record.is_active === 1 || record.is_active === true) && (
+            <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDelete(record.id)} title="Ngưng hoạt động" />
+          )}
         </Space>
       )
     }
@@ -74,14 +86,32 @@ const TuyenDuongPage = () => {
         <Title level={4} style={{ margin: 0 }}>Quản lý Tuyến đường</Title>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => openModal()}>Thêm mới</Button>
       </div>
-      <Input placeholder="Tìm tỉnh đi/đến..." prefix={<SearchOutlined />} style={{ width: 300, marginBottom: 16 }} allowClear onBlur={e => setSearch(e.target.value)} onPressEnter={e => setSearch(e.target.value)} />
+      
+      {/* FIX: Dùng Input.Search để tìm kiếm mượt hơn */}
+      <Input.Search 
+        placeholder="Tìm tỉnh đi/đến..." 
+        enterButton={<SearchOutlined />} 
+        style={{ width: 300, marginBottom: 16 }} 
+        allowClear 
+        onSearch={(value) => {
+          setSearch(value);
+          onChange(1, limit); // Ép về trang 1 khi tìm
+        }}
+        onChange={(e) => {
+          if (!e.target.value) {
+            setSearch('');
+            onChange(1, limit);
+          }
+        }} 
+      />
+      
       <Table columns={columns} dataSource={data} rowKey="id" loading={loading} pagination={{ current: page, pageSize: limit, total, onChange }} bordered />
       
       <Modal title={editingId ? "Sửa tuyến đường" : "Thêm tuyến đường"} open={isModalVisible} onCancel={() => setIsModalVisible(false)} onOk={() => form.submit()} destroyOnClose>
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
-          <Form.Item name="tinhDi" label="Tỉnh đi" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="tinhDen" label="Tỉnh đến" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="km" label="Khoảng cách (Km)" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={1} /></Form.Item>
+          <Form.Item name="tinhDi" label="Tỉnh đi" rules={[{ required: true, message: 'Vui lòng nhập tỉnh đi' }]}><Input /></Form.Item>
+          <Form.Item name="tinhDen" label="Tỉnh đến" rules={[{ required: true, message: 'Vui lòng nhập tỉnh đến' }]}><Input /></Form.Item>
+          <Form.Item name="km" label="Khoảng cách (Km)" rules={[{ required: true, message: 'Vui lòng nhập khoảng cách' }]}><InputNumber style={{ width: '100%' }} min={1} /></Form.Item>
         </Form>
       </Modal>
     </Card>

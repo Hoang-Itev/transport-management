@@ -61,24 +61,15 @@ const CargoType = {
     return true;
   },
 
+  // FIX: Vô hiệu hóa dây chuyền Loại hàng -> Bảng giá cước
   softDelete: async (id) => {
+    // 1. Ngưng hoạt động loại hàng
     await db.query(`UPDATE loai_hangs SET is_active = 0 WHERE id = ?`, [id]);
+    
+    // 2. Ngưng hoạt động toàn bộ Bảng giá cước liên quan đến loại hàng này
+    await db.query(`UPDATE bang_gia_cuocs SET is_active = 0 WHERE loai_hang_id = ?`, [id]);
+    
     return true;
-  },
-
-  // KIỂM TRA NGHIỆP VỤ XÓA
-  checkInUse: async (cargoTypeId) => {
-    // Giả lập kiểm tra bảng bang_gias. 
-    // Nếu chưa tạo bảng bang_gias, mình bọc try-catch để nó không sập server lúc test.
-    try {
-      const [rows] = await db.query(
-        `SELECT COUNT(*) as count FROM bang_gias WHERE loai_hang_id = ? AND is_active = 1`,
-        [cargoTypeId]
-      );
-      return rows[0].count > 0;
-    } catch (err) {
-      return false; // Trả về false nếu chưa có bảng bang_gias
-    }
   }
 };
 

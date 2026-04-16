@@ -129,7 +129,6 @@ const BaoGiaDetail = () => {
                 await baoGiaService.guiBaoGia(id);
                 message.success('Đã chuyển trạng thái báo giá thành ĐÃ GỬI');
                 
-                // --- THÊM MỚI: TỰ ĐỘNG TẢI PDF ---
                 message.loading({ content: 'Đang khởi tạo file PDF...', key: 'pdf_download' });
                 try {
                     await baoGiaService.exportPdf(id);
@@ -137,7 +136,6 @@ const BaoGiaDetail = () => {
                 } catch (pdfErr) {
                     message.error({ content: 'Lỗi tải PDF (nhưng báo giá đã được chuyển trạng thái).', key: 'pdf_download' });
                 }
-                // ---------------------------------
                 
             } else if (actionType === 'XAC_NHAN') {
                 await baoGiaService.xacNhan(id, { trangThai: 'ACCEPTED', lyDo: '' });
@@ -165,7 +163,17 @@ const BaoGiaDetail = () => {
 
                 {isEdit && (
                     <Space>
-                        {baoGiaData?.trang_thai === 'DRAFT' && <Button type="primary" icon={<SendOutlined />} onClick={() => handleAction('GUI')}>Gửi KH (Tải PDF)</Button>}
+                        {baoGiaData?.trang_thai === 'DRAFT' && (
+                            <Popconfirm 
+                                title="Gửi báo giá cho khách?" 
+                                description="Hệ thống sẽ chuyển trạng thái và tải PDF về máy."
+                                onConfirm={() => handleAction('GUI')}
+                                okText="Gửi & Tải PDF"
+                                cancelText="Hủy"
+                            >
+                                <Button type="primary" icon={<SendOutlined />}>Gửi KH (Tải PDF)</Button>
+                            </Popconfirm>
+                        )}
                         {baoGiaData?.trang_thai === 'SENT' && (
                             <>
                                 <Popconfirm title="Xác nhận khách đã đồng ý chốt giá?" onConfirm={() => handleAction('XAC_NHAN')}>
@@ -176,7 +184,6 @@ const BaoGiaDetail = () => {
                                 </Popconfirm>
                             </>
                         )}
-                        {/* Nhắc nhở tạo Vận đơn */}
                         {baoGiaData?.trang_thai === 'ACCEPTED' && (
                             <div style={{ backgroundColor: '#f6ffed', border: '1px solid #b7eb8f', padding: '6px 16px', borderRadius: 6, color: '#389e0d', fontWeight: 500 }}>
                                 Đã chốt! Hãy kéo xuống tạo Vận đơn 👇
@@ -195,10 +202,10 @@ const BaoGiaDetail = () => {
                             <Select
                                 showSearch
                                 placeholder="Tìm tên hoặc SĐT..."
-                                optionFilterProp="children"
-                                filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+                                optionFilterProp="label"
+                                filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
                                 options={khachHangList.map(kh => ({ value: kh.id, label: `${kh.ten_cong_ty} (${kh.so_dien_thoai})` }))}
-                                disabled={isEdit} // Khách hàng tạo xong không cho đổi
+                                disabled={isEdit} 
                             />
                         </Form.Item>
                     </Col>
@@ -228,7 +235,6 @@ const BaoGiaDetail = () => {
                                     extra={
                                         <Space>
                                             {isDraft && <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(name)} title="Xóa chuyến này" />}
-                                            {/* Nút Tạo Vận Đơn giờ đã có thể bấm được! */}
                                             {baoGiaData?.trang_thai === 'ACCEPTED' && (
                                                 <Button
                                                     type="primary"
@@ -249,10 +255,19 @@ const BaoGiaDetail = () => {
                                             <Form.Item {...restField} label="Tuyến đường" name={[name, 'tuyenDuongId']} rules={[{ required: true }]}>
                                                 <Select
                                                     showSearch
-                                                    placeholder="Gõ để tìm tuyến..."
-                                                    optionFilterProp="children"
-                                                    filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-                                                    options={tuyenDuongList.map(td => ({ value: Number(td.id), label: td.ten_tuyen_duong || td.tenTuyenDuong || td.ten_tuyen || td.tenTuyen || `Tuyến số ${td.id}` }))}
+                                                    placeholder="Gõ để tìm tuyến (VD: HCM)..."
+                                                    optionFilterProp="label"
+                                                    filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+                                                    // LỌC: Bỏ qua những tuyến đường đã ngưng hoạt động
+                                                    options={tuyenDuongList
+                                                        .filter(td => td.is_active === 1 || td.is_active === true || td.isActive === 1 || td.isActive === true)
+                                                        .map(td => {
+                                                            const labelDisplay = (td.tinh_di && td.tinh_den) 
+                                                                                ? `${td.tinh_di} - ${td.tinh_den}` 
+                                                                                : (td.ten_tuyen_duong || td.tenTuyenDuong || td.ten_tuyen || td.tenTuyen || `Tuyến số ${td.id}`);
+                                                            return { value: Number(td.id), label: labelDisplay };
+                                                        })
+                                                    }
                                                     disabled={!isDraft}
                                                 />
                                             </Form.Item>
@@ -262,9 +277,16 @@ const BaoGiaDetail = () => {
                                                 <Select
                                                     showSearch
                                                     placeholder="Gõ để tìm loại..."
-                                                    optionFilterProp="children"
-                                                    filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-                                                    options={loaiHangList.map(lh => ({ value: Number(lh.id), label: lh.ten_loai_hang || lh.tenLoaiHang || lh.ten_loai || lh.tenLoai || `Mã loại ${lh.id}` }))}
+                                                    optionFilterProp="label"
+                                                    filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+                                                    // LỌC: Bỏ qua những loại hàng đã ngưng hoạt động
+                                                    options={loaiHangList
+                                                        .filter(lh => lh.is_active === 1 || lh.is_active === true || lh.isActive === 1 || lh.isActive === true)
+                                                        .map(lh => {
+                                                            const labelDisplay = lh.ten || lh.ten_loai_hang || lh.tenLoaiHang || lh.ten_loai || lh.tenLoai || `Mã loại ${lh.id}`;
+                                                            return { value: Number(lh.id), label: labelDisplay };
+                                                        })
+                                                    }
                                                     disabled={!isDraft}
                                                 />
                                             </Form.Item>

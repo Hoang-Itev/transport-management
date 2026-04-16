@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Space, Typography, Checkbox, Input, Button, Row, Col, Divider, Spin, Tag, message } from 'antd';
-import { SearchOutlined, DownloadOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import { DownloadOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import { congNoService } from '../../services/congNoService';
 import CurrencyText from '../../components/common/CurrencyText';
 import { formatDate } from '../../utils/formatDate';
@@ -107,13 +107,19 @@ const CongNoPage = () => {
         {/* === CỘT TRÁI: DANH SÁCH KHÁCH HÀNG === */}
         <Col span={14}>
           <Space style={{ marginBottom: 16 }} wrap>
-            <Input 
+            {/* FIX: Đổi từ Input thường sang Input.Search có nút bấm thực sự */}
+            <Input.Search 
               placeholder="Tìm tên khách hàng..." 
-              prefix={<SearchOutlined />} 
-              style={{ width: 250 }} 
+              enterButton="Tìm kiếm"
+              style={{ width: 300 }} 
               allowClear 
-              onPressEnter={e => setSearch(e.target.value)}
-              onBlur={e => setSearch(e.target.value)}
+              onSearch={(value) => setSearch(value)}
+              onChange={(e) => {
+                // Tự động load lại danh sách gốc nếu người dùng bấm nút "x" xóa trắng ô tìm kiếm
+                if (!e.target.value) {
+                  setSearch('');
+                }
+              }}
             />
             <Checkbox checked={chiQuaHan} onChange={(e) => setChiQuaHan(e.target.checked)}>
               <Text type="danger">Chỉ hiển thị Khách đang có nợ quá hạn</Text>
@@ -127,7 +133,6 @@ const CongNoPage = () => {
             loading={loading} 
             pagination={{ current: page, pageSize: limit, total, onChange }} 
             bordered
-            // Highlight dòng đang được chọn
             rowClassName={(record) => record.khachHangId === selectedKh?.khachHangId ? 'ant-table-row-selected' : ''}
             onRow={(record) => ({
               onClick: () => handleRowClick(record),
@@ -180,7 +185,7 @@ const CongNoPage = () => {
                 <Table 
                   size="small"
                   dataSource={detailData.lichSuThanhToan || []} 
-                  rowKey={(r) => r.maPhieuThu + r.vanDonId} // Tránh trùng key
+                  rowKey={(r) => r.maPhieuThu + r.vanDonId}
                   pagination={{ pageSize: 5 }}
                   columns={[
                     { title: 'Phiếu', dataIndex: 'maPhieuThu' },

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Select, Button, Table, Space, Typography, message, Modal, DatePicker, Tooltip } from 'antd';
+// FIX: Đã thêm Popconfirm vào danh sách import từ antd
+import { Card, Select, Button, Table, Space, Typography, message, Modal, DatePicker, Tooltip, Popconfirm } from 'antd';
 import { PlusOutlined, EditOutlined, SendOutlined, CheckCircleOutlined, CloseCircleOutlined, EyeOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 
@@ -59,18 +60,26 @@ const BaoGiaPage = () => {
   useEffect(() => { fetchData(); }, [page, limit, trangThai, dateRange]);
 
   // Hành động: Gửi cho khách
-  const handleGui = (id) => {
-    Modal.confirm({
-      title: 'Xác nhận gửi báo giá',
-      content: 'Báo giá sẽ chuyển sang trạng thái SENT. Bạn không thể sửa chi tiết được nữa.',
-      onOk: async () => {
-        try {
-          await baoGiaService.guiBaoGia(id);
-          message.success('Đã gửi báo giá thành công!');
-          fetchData();
-        } catch (error) { message.error(error?.error?.message || 'Lỗi khi gửi'); }
+  const handleGui = async (id) => {
+    try {
+      // 1. Chuyển trạng thái
+      await baoGiaService.guiBaoGia(id);
+      message.success('Đã chuyển trạng thái báo giá thành ĐÃ GỬI');
+      
+      // 2. Tải PDF trực tiếp
+      message.loading({ content: 'Đang khởi tạo file PDF...', key: 'pdf_download' });
+      try {
+        await baoGiaService.exportPdf(id);
+        message.success({ content: 'Đã tải file PDF về máy!', key: 'pdf_download' });
+      } catch (pdfErr) {
+        message.error({ content: 'Lỗi tải PDF (nhưng báo giá đã được chuyển trạng thái).', key: 'pdf_download' });
       }
-    });
+
+      // 3. Load lại bảng
+      fetchData();
+    } catch (error) { 
+      message.error(error?.error?.message || 'Lỗi khi gửi'); 
+    }
   };
 
   // Hành động: Xác nhận / Từ chối (Dành cho SENT)
@@ -91,41 +100,41 @@ const BaoGiaPage = () => {
   };
 
   const columns = [
-    { 
-      title: 'Mã', 
-      dataIndex: 'id', 
-      render: (id) => <Text strong>BG-{id}</Text> 
+    {
+      title: 'Mã',
+      dataIndex: 'id',
+      render: (id) => <Text strong>BG-{id}</Text>
     },
-    { 
-      title: 'Khách hàng', 
-      dataIndex: 'khach_hang_id', 
+    {
+      title: 'Khách hàng',
+      dataIndex: 'khach_hang_id',
       render: (val) => {
         // Dò tìm ID trong danh sách để lấy ra tên công ty
         const kh = khachHangList.find(k => k.id === val);
         return kh ? <Text strong style={{ color: '#1890ff' }}>{kh.ten_cong_ty}</Text> : `KH ID: ${val}`;
-      } 
+      }
     },
-    { 
-      title: 'Ngày tạo', 
-      dataIndex: 'ngay_tao', 
-      render: (val) => formatDate(val) 
+    {
+      title: 'Ngày tạo',
+      dataIndex: 'ngay_tao',
+      render: (val) => formatDate(val)
     },
-    { 
-      title: 'Hết hạn', 
-      dataIndex: 'ngay_het_han', 
-      render: (val) => formatDate(val) 
+    {
+      title: 'Hết hạn',
+      dataIndex: 'ngay_het_han',
+      render: (val) => formatDate(val)
     },
-    { 
-      title: 'Tổng GT', 
-      dataIndex: 'tong_gia_tri', 
-      align: 'right', 
-      render: (val) => <CurrencyText value={val} /> 
+    {
+      title: 'Tổng GT',
+      dataIndex: 'tong_gia_tri',
+      align: 'right',
+      render: (val) => <CurrencyText value={val} />
     },
-    { 
-      title: 'Trạng thái', 
-      dataIndex: 'trang_thai', 
-      align: 'center', 
-      render: (val) => <StatusTag status={val} /> 
+    {
+      title: 'Trạng thái',
+      dataIndex: 'trang_thai',
+      align: 'center',
+      render: (val) => <StatusTag status={val} />
     },
     {
       title: 'Thao tác',
@@ -143,8 +152,17 @@ const BaoGiaPage = () => {
                 <Tooltip title="Sửa báo giá">
                   <Button type="text" style={{ color: '#fa8c16' }} icon={<EditOutlined />} onClick={() => navigate(`/bao-gia/${id}`)} />
                 </Tooltip>
+                
                 <Tooltip title="Gửi khách hàng">
-                  <Button type="text" style={{ color: '#1890ff' }} icon={<SendOutlined />} onClick={() => handleGui(id)} />
+                  <Popconfirm 
+                    title="Gửi báo giá cho khách?" 
+                    description="Hệ thống sẽ chuyển trạng thái và tải PDF về máy."
+                    onConfirm={() => handleGui(id)}
+                    okText="Gửi & Tải PDF"
+                    cancelText="Hủy"
+                  >
+                    <Button type="text" style={{ color: '#1890ff' }} icon={<SendOutlined />} />
+                  </Popconfirm>
                 </Tooltip>
               </>
             )}
@@ -182,13 +200,13 @@ const BaoGiaPage = () => {
         <RangePicker format="DD/MM/YYYY" onChange={setDateRange} style={{ width: 250 }} />
       </Space>
 
-      <Table 
-        columns={columns} 
-        dataSource={data} 
-        rowKey="id" 
-        loading={loading} 
-        pagination={{ current: page, pageSize: limit, total: total, onChange: onChange }} 
-        bordered 
+      <Table
+        columns={columns}
+        dataSource={data}
+        rowKey="id"
+        loading={loading}
+        pagination={{ current: page, pageSize: limit, total: total, onChange: onChange }}
+        bordered
       />
     </Card>
   );

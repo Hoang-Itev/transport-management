@@ -46,16 +46,16 @@ const updateRoute = async (req, res) => {
 const deleteRoute = async (req, res) => {
   try {
     const { id } = req.params;
-    const isUsed = await Route.checkInUse(id);
-    if (isUsed) {
-      return res.status(422).json({ 
-        success: false, 
-        error: { code: 'DANH_MUC_DANG_DUOC_SU_DUNG', message: 'Không thể xóa tuyến đường đang có bảng giá hiệu lực' } 
-      });
+    
+    // Kiểm tra tồn tại trước
+    const route = await Route.findById(id);
+    if (!route) {
+      return res.status(404).json({ success: false, error: { message: 'Không tìm thấy tuyến đường' } });
     }
 
+    // Xóa dây chuyền (Tuyến đường + Bảng giá)
     await Route.softDelete(id);
-    res.json({ success: true, message: 'Đã vô hiệu hóa tuyến đường' });
+    res.json({ success: true, message: 'Đã vô hiệu hóa tuyến đường và các bảng giá liên quan' });
   } catch (error) {
     res.status(500).json({ success: false, error: { message: error.message } });
   }
