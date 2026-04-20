@@ -24,7 +24,7 @@ const AppSider = ({ collapsed }) => {
   const menuItems = [
     // 1. Dashboard: CHỈ Manager
     ...(role === 'MANAGER' ? [{
-      key: '/dashboard',
+      key: '/', // 🚀 FIX TẠI ĐÂY: Đổi từ '/dashboard' thành '/' cho khớp với Route index
       icon: <DashboardOutlined />,
       label: 'Tổng quan'
     }] : []),
