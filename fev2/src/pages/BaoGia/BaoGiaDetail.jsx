@@ -27,6 +27,8 @@ const BaoGiaDetail = () => {
     const [tuyenDuongList, setTuyenDuongList] = useState([]);
     const [loaiHangList, setLoaiHangList] = useState([]);
 
+    const [currentKhachHangId, setCurrentKhachHangId] = useState(null);
+
     const [isCreateVdVisible, setIsCreateVdVisible] = useState(false);
     const [selectedChiTietId, setSelectedChiTietId] = useState(null);
     const [vdForm] = Form.useForm();
@@ -54,24 +56,6 @@ const BaoGiaDetail = () => {
         if (isEdit) loadDetail();
     }, [id]);
 
-    const handleCreateVanDon = async (values) => {
-        try {
-            const payload = {
-                baoGiaChiTietId: selectedChiTietId,
-                nguoiLienHeLay: values.nguoiLienHeLay,
-                nguoiLienHeGiao: values.nguoiLienHeGiao,
-                ngayVanChuyen: values.ngayVanChuyen.format('YYYY-MM-DD')
-            };
-            const res = await vanDonService.create(payload);
-            message.success('Tạo Vận đơn thành công!');
-            setIsCreateVdVisible(false);
-            vdForm.resetFields();
-            navigate(`/van-don/${res.data.id}`);
-        } catch (error) {
-            message.error(error?.error?.message || 'Lỗi khi tạo vận đơn');
-        }
-    };
-
     const loadDetail = async () => {
         try {
             const res = await baoGiaService.getById(id);
@@ -79,6 +63,8 @@ const BaoGiaDetail = () => {
                 setBaoGiaData(res.data);
                 const chiTietArr = res.data.chiTiet || res.data.chi_tiet || [];
                 
+                setCurrentKhachHangId(res.data.khach_hang_id);
+
                 form.setFieldsValue({
                     khachHangId: res.data.khach_hang_id,
                     ngayHetHan: dayjs(res.data.ngay_het_han),
@@ -101,8 +87,31 @@ const BaoGiaDetail = () => {
         }
     };
 
+    // NGHIỆP VỤ: TÍNH TOÁN CÔNG NỢ & QUÁ HẠN
+    const selectedKhachHang = khachHangList.find(kh => kh.id === currentKhachHangId);
+    const currentDebt = Number(selectedKhachHang?.cong_no_hien_tai) || 0;
+    const debtLimit = Number(selectedKhachHang?.han_muc_cong_no) || 0;
+    
+    // BỔ SUNG: Kiểm tra số đơn quá hạn thanh toán
+    const soDonQuaHan = Number(selectedKhachHang?.so_don_qua_han) || 0;
+    const isQuaHan = soDonQuaHan > 0;
+    const isVuotHanMuc = selectedKhachHang && debtLimit > 0 && currentDebt > debtLimit;
+
+    // Cờ khóa toàn bộ các nút thao tác lưu/gửi nếu bị chặn nghiệp vụ
+    const isBlocked = isVuotHanMuc || isQuaHan;
+
     const onFinish = async (values) => {
         if (!isDraft) return;
+
+        if (isQuaHan) {
+            message.error(`LỖI: Khách hàng đang có ${soDonQuaHan} đơn QUÁ HẠN THANH TOÁN!`);
+            return;
+        }
+        if (isVuotHanMuc) {
+            message.error('LỖI: Khách hàng đã vượt quá hạn mức công nợ!');
+            return;
+        }
+
         setLoading(true);
         try {
             const payload = { ...values, ngayHetHan: values.ngayHetHan.format('YYYY-MM-DD') };
@@ -112,12 +121,17 @@ const BaoGiaDetail = () => {
                 message.success('Tạo báo giá thành công!');
                 navigate(`/bao-gia/${res.data.id}`);
             } else {
-                await baoGiaService.update(id, { ngayHetHan: payload.ngayHetHan, ghiChu: payload.ghiChu });
+                await baoGiaService.update(id, { 
+                    ngayHetHan: payload.ngayHetHan, 
+                    ghiChu: payload.ghiChu,
+                    chiTiet: payload.chiTiet 
+                });
                 message.success('Đã lưu thay đổi báo giá');
                 loadDetail();
             }
         } catch (error) {
-            message.error(error?.error?.message || 'Lỗi khi lưu');
+            const errorMsg = error?.response?.data?.error?.message || error?.error?.message || 'Lỗi khi lưu báo giá';
+            message.error(errorMsg);
         } finally {
             setLoading(false);
         }
@@ -134,7 +148,7 @@ const BaoGiaDetail = () => {
                     await baoGiaService.exportPdf(id);
                     message.success({ content: 'Đã tải file PDF về máy!', key: 'pdf_download' });
                 } catch (pdfErr) {
-                    message.error({ content: 'Lỗi tải PDF (nhưng báo giá đã được chuyển trạng thái).', key: 'pdf_download' });
+                    message.error({ content: 'Lỗi tải PDF', key: 'pdf_download' });
                 }
                 
             } else if (actionType === 'XAC_NHAN') {
@@ -147,6 +161,25 @@ const BaoGiaDetail = () => {
             loadDetail(); 
         } catch (error) {
             message.error('Lỗi thao tác');
+        }
+    };
+
+    const handleCreateVanDon = async (values) => {
+        try {
+            const payload = {
+                baoGiaChiTietId: selectedTrip ? selectedTrip.bao_gia_chi_tiet_id : selectedChiTietId,
+                nguoiLienHeLay: values.nguoiLienHeLay,
+                nguoiLienHeGiao: values.nguoiLienHeGiao,
+                ngayVanChuyen: values.ngayVanChuyen.format('YYYY-MM-DD'),
+                ngayHetHanThanhToan: values.ngayHetHanThanhToan.format('YYYY-MM-DD') 
+            };
+            const res = await vanDonService.create(payload);
+            message.success('Tạo Vận đơn thành công!');
+            setIsCreateVdVisible(false);
+            vdForm.resetFields();
+            navigate(`/van-don/${res.data.id}`);
+        } catch (error) {
+            message.error(error?.error?.message || 'Lỗi khi tạo vận đơn');
         }
     };
 
@@ -163,17 +196,6 @@ const BaoGiaDetail = () => {
 
                 {isEdit && (
                     <Space>
-                        {baoGiaData?.trang_thai === 'DRAFT' && (
-                            <Popconfirm 
-                                title="Gửi báo giá cho khách?" 
-                                description="Hệ thống sẽ chuyển trạng thái và tải PDF về máy."
-                                onConfirm={() => handleAction('GUI')}
-                                okText="Gửi & Tải PDF"
-                                cancelText="Hủy"
-                            >
-                                <Button type="primary" icon={<SendOutlined />}>Gửi KH (Tải PDF)</Button>
-                            </Popconfirm>
-                        )}
                         {baoGiaData?.trang_thai === 'SENT' && (
                             <>
                                 <Popconfirm title="Xác nhận khách đã đồng ý chốt giá?" onConfirm={() => handleAction('XAC_NHAN')}>
@@ -198,16 +220,49 @@ const BaoGiaDetail = () => {
                 <Divider orientation="left">Thông tin chung</Divider>
                 <Row gutter={24}>
                     <Col span={8}>
-                        <Form.Item label="Khách hàng" name="khachHangId" rules={[{ required: true, message: 'Vui lòng chọn khách hàng' }]}>
+                        <Form.Item label="Khách hàng" name="khachHangId" rules={[{ required: true, message: 'Vui lòng chọn khách hàng' }]} style={{ marginBottom: selectedKhachHang ? 8 : 24 }}>
                             <Select
                                 showSearch
                                 placeholder="Tìm tên hoặc SĐT..."
                                 optionFilterProp="label"
                                 filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
                                 options={khachHangList.map(kh => ({ value: kh.id, label: `${kh.ten_cong_ty} (${kh.so_dien_thoai})` }))}
-                                disabled={isEdit} 
+                                disabled={isEdit}
+                                onChange={(val) => setCurrentKhachHangId(val)}
                             />
                         </Form.Item>
+
+                        {/* HIỂN THỊ CẢNH BÁO KÉP (CÔNG NỢ VÀ QUÁ HẠN) */}
+                        {selectedKhachHang && (
+                            <div style={{ 
+                                marginBottom: 24, 
+                                padding: '10px 12px', 
+                                borderRadius: 6, 
+                                backgroundColor: isBlocked ? '#fff2f0' : '#f6ffed', 
+                                border: `1px solid ${isBlocked ? '#ffccc7' : '#b7eb8f'}` 
+                            }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                    <Text type="secondary">Nợ hiện tại:</Text>
+                                    <Text strong type={isVuotHanMuc ? 'danger' : ''}><CurrencyText value={currentDebt} /></Text>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <Text type="secondary">Hạn mức:</Text>
+                                    <Text strong><CurrencyText value={debtLimit} /></Text>
+                                </div>
+                                
+                                {/* Thông báo đỏ nếu bị dính 1 trong 2 lỗi */}
+                                {isQuaHan && (
+                                    <div style={{ color: '#cf1322', marginTop: 8, fontSize: 13, fontWeight: 500 }}>
+                                        ⚠️ Khách đang có <strong style={{fontSize: 15}}>{soDonQuaHan}</strong> đơn quá hạn thanh toán!
+                                    </div>
+                                )}
+                                {isVuotHanMuc && !isQuaHan && (
+                                    <div style={{ color: '#cf1322', marginTop: 8, fontSize: 13, fontWeight: 500 }}>
+                                        ⚠️ Khách đã vượt hạn mức công nợ!
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </Col>
                     <Col span={8}>
                         <Form.Item label="Ngày hết hạn" name="ngayHetHan" rules={[{ required: true }]}>
@@ -258,7 +313,6 @@ const BaoGiaDetail = () => {
                                                     placeholder="Gõ để tìm tuyến (VD: HCM)..."
                                                     optionFilterProp="label"
                                                     filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-                                                    // LỌC: Bỏ qua những tuyến đường đã ngưng hoạt động
                                                     options={tuyenDuongList
                                                         .filter(td => td.is_active === 1 || td.is_active === true || td.isActive === 1 || td.isActive === true)
                                                         .map(td => {
@@ -279,7 +333,6 @@ const BaoGiaDetail = () => {
                                                     placeholder="Gõ để tìm loại..."
                                                     optionFilterProp="label"
                                                     filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-                                                    // LỌC: Bỏ qua những loại hàng đã ngưng hoạt động
                                                     options={loaiHangList
                                                         .filter(lh => lh.is_active === 1 || lh.is_active === true || lh.isActive === 1 || lh.isActive === true)
                                                         .map(lh => {
@@ -323,7 +376,8 @@ const BaoGiaDetail = () => {
                                 </Card>
                             ))}
 
-                            {isDraft && (
+                            {/* CHẶN NÚT THÊM CHUYẾN NẾU BỊ BLOCK */}
+                            {isDraft && !isBlocked && (
                                 <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />} style={{ marginBottom: 16, height: 40 }}>
                                     Thêm chuyến hàng
                                 </Button>
@@ -340,14 +394,31 @@ const BaoGiaDetail = () => {
                     </div>
                 )}
 
-                {isDraft && (
-                    <div style={{ textAlign: 'right', marginTop: 24 }}>
-                        <Button onClick={() => navigate('/bao-gia')} style={{ marginRight: 12 }}>Hủy thao tác</Button>
-                        <Button type="primary" htmlType="submit" size="large" icon={<SaveOutlined />} loading={loading}>
-                            Lưu báo giá (Tra giá tự động)
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: 24 }}>
+                    <Button onClick={() => navigate('/bao-gia')}>Quay lại</Button>
+                    
+                    {isDraft && (
+                        // NÚT LƯU SẼ BỊ VÔ HIỆU HÓA NẾU BỊ BLOCK
+                        <Button type="primary" htmlType="submit" size="large" icon={<SaveOutlined />} loading={loading} disabled={isBlocked}>
+                            Lưu báo giá (Cập nhật giá)
                         </Button>
-                    </div>
-                )}
+                    )}
+
+                    {isEdit && baoGiaData?.trang_thai === 'DRAFT' && (
+                        <Popconfirm 
+                            title="Chốt và gửi báo giá cho khách?" 
+                            description="Hệ thống sẽ chốt giá hiện tại và tải file PDF về máy."
+                            onConfirm={() => handleAction('GUI')}
+                            okText="Gửi & Tải PDF"
+                            cancelText="Hủy"
+                            disabled={isBlocked}
+                        >
+                            <Button type="primary" style={{ backgroundColor: isBlocked ? '#bfbfbf' : '#52c41a' }} size="large" icon={<SendOutlined />} disabled={isBlocked}>
+                                Gửi KH (Tải PDF)
+                            </Button>
+                        </Popconfirm>
+                    )}
+                </div>
             </Form>
 
             {/* MODAL TẠO VẬN ĐƠN */}
@@ -359,14 +430,20 @@ const BaoGiaDetail = () => {
                 destroyOnClose
             >
                 <Form form={vdForm} layout="vertical" onFinish={handleCreateVanDon}>
-                    <Form.Item name="ngayVanChuyen" label="Ngày vận chuyển (Dự kiến đi)" rules={[{ required: true }]}>
+                    <Form.Item name="ngayVanChuyen" label="Ngày vận chuyển (Dự kiến đi)" rules={[{ required: true, message: 'Vui lòng chọn ngày đi' }]}>
                         <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
                     </Form.Item>
-                    <Form.Item name="nguoiLienHeLay" label="Thông tin người lấy hàng" rules={[{ required: true }]}>
+                    
+                    <Form.Item name="nguoiLienHeLay" label="Thông tin người lấy hàng" rules={[{ required: true, message: 'Vui lòng nhập thông tin người lấy' }]}>
                         <Input placeholder="Tên và SĐT người ở kho bốc..." />
                     </Form.Item>
-                    <Form.Item name="nguoiLienHeGiao" label="Thông tin người nhận hàng" rules={[{ required: true }]}>
+                    
+                    <Form.Item name="nguoiLienHeGiao" label="Thông tin người nhận hàng" rules={[{ required: true, message: 'Vui lòng nhập thông tin người nhận' }]}>
                         <Input placeholder="Tên và SĐT người nhận hàng..." />
+                    </Form.Item>
+                    
+                    <Form.Item name="ngayHetHanThanhToan" label="Hạn chót thanh toán" rules={[{ required: true, message: 'Vui lòng chọn hạn chót' }]}>
+                        <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
                     </Form.Item>
                 </Form>
             </Modal>

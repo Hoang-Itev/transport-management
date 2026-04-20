@@ -19,10 +19,8 @@ const AppSider = ({ collapsed }) => {
   const location = useLocation();
   const { user } = useAuth();
 
-  // FIX: Đảm bảo lấy đúng tên cột 'vai_tro' từ Database/LocalStorage
   const role = user?.vai_tro || user?.vaiTro; 
 
-  // Cấu hình menu động theo bảng phân quyền (Manager, Sale, Ke_Toan)
   const menuItems = [
     // 1. Dashboard: CHỈ Manager
     ...(role === 'MANAGER' ? [{
@@ -52,12 +50,12 @@ const AppSider = ({ collapsed }) => {
       label: 'Vận đơn'
     },
 
-    // 5. Phiếu thu: Tất cả (MANAGER, SALE, KE_TOAN)
-    {
+    // 5. Phiếu thu: CHỈ Manager + Kế toán (Sale đã có trang Công nợ để xem lịch sử)
+    ...(['MANAGER', 'KE_TOAN'].includes(role) ? [{
       key: '/phieu-thu',
       icon: <DollarOutlined />,
       label: 'Phiếu thu'
-    },
+    }] : []),
 
     // 6. Công nợ: Tất cả (MANAGER, SALE, KE_TOAN)
     {
@@ -66,13 +64,16 @@ const AppSider = ({ collapsed }) => {
       label: 'Công nợ'
     },
 
-    // 7. Danh mục cấu hình: CHỈ Manager
-    ...(role === 'MANAGER' ? [{
+    // 7. Danh mục cấu hình: Manager + Sale
+    ...(['MANAGER', 'SALE'].includes(role) ? [{
       key: 'danh-muc',
       icon: <SettingOutlined />,
       label: 'Danh mục',
       children: [
-        { key: '/danh-muc/nguoi-dung', label: 'Người dùng' },
+        // Quản lý người dùng: CHỈ MANAGER mới được thấy
+        ...(role === 'MANAGER' ? [{ key: '/danh-muc/nguoi-dung', label: 'Người dùng' }] : []),
+        
+        // Tuyến, Loại hàng, Giá: Sale được vào xem để báo giá khách
         { key: '/danh-muc/loai-hang', label: 'Loại hàng' },
         { key: '/danh-muc/tuyen-duong', label: 'Tuyến đường' },
         { key: '/danh-muc/bang-gia', label: 'Bảng giá cước' },
@@ -89,7 +90,6 @@ const AppSider = ({ collapsed }) => {
         theme="dark"
         mode="inline"
         selectedKeys={[location.pathname]}
-        // Logic để mở rộng menu "Danh mục" nếu đang ở trang con của nó
         defaultOpenKeys={location.pathname.includes('danh-muc') ? ['danh-muc'] : []}
         items={menuItems}
         onClick={({ key }) => navigate(key)}

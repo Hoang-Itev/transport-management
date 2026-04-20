@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-// FIX: Đã thêm Popconfirm vào danh sách import từ antd
-import { Card, Select, Button, Table, Space, Typography, message, Modal, DatePicker, Tooltip, Popconfirm } from 'antd';
+import { Card, Select, Button, Table, Space, Typography, message, Modal, DatePicker, Tooltip, Popconfirm, Tag } from 'antd'; // FIX: Thêm Tag
 import { PlusOutlined, EditOutlined, SendOutlined, CheckCircleOutlined, CloseCircleOutlined, EyeOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import dayjs from 'dayjs'; // FIX: Đảm bảo dayjs đã được import
 
 import { baoGiaService } from '../../services/baoGiaService';
-import { khachHangService } from '../../services/khachHangService'; // Dùng để lấy tên KH
+import { khachHangService } from '../../services/khachHangService'; 
 import { usePagination } from '../../hooks/usePagination';
 import CurrencyText from '../../components/common/CurrencyText';
 import StatusTag from '../../components/common/StatusTag';
@@ -21,12 +21,11 @@ const BaoGiaPage = () => {
   
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
-  const [khachHangList, setKhachHangList] = useState([]); // Chứa danh sách KH để map tên
+  const [khachHangList, setKhachHangList] = useState([]); 
   
   const [trangThai, setTrangThai] = useState(null);
   const [dateRange, setDateRange] = useState([]);
 
-  // Tải danh sách khách hàng 1 lần duy nhất khi mở trang để lấy Tên map vào ID
   useEffect(() => {
     const fetchKhachHang = async () => {
       try {
@@ -59,14 +58,11 @@ const BaoGiaPage = () => {
 
   useEffect(() => { fetchData(); }, [page, limit, trangThai, dateRange]);
 
-  // Hành động: Gửi cho khách
   const handleGui = async (id) => {
     try {
-      // 1. Chuyển trạng thái
       await baoGiaService.guiBaoGia(id);
       message.success('Đã chuyển trạng thái báo giá thành ĐÃ GỬI');
       
-      // 2. Tải PDF trực tiếp
       message.loading({ content: 'Đang khởi tạo file PDF...', key: 'pdf_download' });
       try {
         await baoGiaService.exportPdf(id);
@@ -74,24 +70,21 @@ const BaoGiaPage = () => {
       } catch (pdfErr) {
         message.error({ content: 'Lỗi tải PDF (nhưng báo giá đã được chuyển trạng thái).', key: 'pdf_download' });
       }
-
-      // 3. Load lại bảng
       fetchData();
     } catch (error) { 
       message.error(error?.error?.message || 'Lỗi khi gửi'); 
     }
   };
 
-  // Hành động: Xác nhận / Từ chối (Dành cho SENT)
   const handleXacNhan = (id, trangThaiMoi) => {
     const isChopNhan = trangThaiMoi === 'ACCEPTED';
     Modal.confirm({
-      title: isChopNhan ? 'Chốt báo giá?' : 'Khách từ chối báo giá?',
+      title: isChopNhan ? 'Chốt báo giá?' : 'Khách từ chối (hoặc Hủy) báo giá?',
       okText: 'Xác nhận',
       okType: isChopNhan ? 'primary' : 'danger',
       onOk: async () => {
         try {
-          await baoGiaService.xacNhan(id, { trangThai: trangThaiMoi, lyDo: isChopNhan ? '' : 'Khách không đồng ý giá' });
+          await baoGiaService.xacNhan(id, { trangThai: trangThaiMoi, lyDo: isChopNhan ? '' : 'Khách không đồng ý giá / Hết hạn' });
           message.success(`Đã ${isChopNhan ? 'chốt' : 'hủy'} báo giá!`);
           fetchData();
         } catch (error) { message.error(error?.error?.message || 'Lỗi thao tác'); }
@@ -109,7 +102,6 @@ const BaoGiaPage = () => {
       title: 'Khách hàng',
       dataIndex: 'khach_hang_id',
       render: (val) => {
-        // Dò tìm ID trong danh sách để lấy ra tên công ty
         const kh = khachHangList.find(k => k.id === val);
         return kh ? <Text strong style={{ color: '#1890ff' }}>{kh.ten_cong_ty}</Text> : `KH ID: ${val}`;
       }
@@ -134,13 +126,26 @@ const BaoGiaPage = () => {
       title: 'Trạng thái',
       dataIndex: 'trang_thai',
       align: 'center',
-      render: (val) => <StatusTag status={val} />
+      render: (val, record) => {
+        // FIX: Thêm logic kiểm tra xem báo giá đã hết hạn chưa
+        const isExpired = record.ngay_het_han && dayjs().startOf('day').isAfter(dayjs(record.ngay_het_han), 'day');
+        
+        // Nếu đang ở trạng thái SENT mà lại quá hạn -> Hiển thị nhãn đỏ Hết hạn
+        if (val === 'SENT' && isExpired) {
+          return <Tag color="error">HẾT HẠN</Tag>;
+        }
+        
+        return <StatusTag status={val} />;
+      }
     },
     {
       title: 'Thao tác',
       align: 'center',
       render: (_, record) => {
         const { id, trang_thai } = record;
+        // FIX: Biến cờ kiểm tra hết hạn để khóa nút thao tác
+        const isExpired = record.ngay_het_han && dayjs().startOf('day').isAfter(dayjs(record.ngay_het_han), 'day');
+
         return (
           <Space size="small">
             <Tooltip title="Xem chi tiết">
@@ -169,10 +174,18 @@ const BaoGiaPage = () => {
 
             {trang_thai === 'SENT' && (
               <>
-                <Tooltip title="Khách đồng ý">
-                  <Button type="text" style={{ color: '#52c41a' }} icon={<CheckCircleOutlined />} onClick={() => handleXacNhan(id, 'ACCEPTED')} />
-                </Tooltip>
-                <Tooltip title="Khách từ chối">
+                {/* FIX: Khóa nút Đồng ý nếu đã hết hạn */}
+                {isExpired ? (
+                  <Tooltip title="Báo giá đã hết hạn, không thể chốt!">
+                    <Button type="text" disabled style={{ color: '#bfbfbf' }} icon={<CheckCircleOutlined />} />
+                  </Tooltip>
+                ) : (
+                  <Tooltip title="Khách đồng ý">
+                    <Button type="text" style={{ color: '#52c41a' }} icon={<CheckCircleOutlined />} onClick={() => handleXacNhan(id, 'ACCEPTED')} />
+                  </Tooltip>
+                )}
+                
+                <Tooltip title={isExpired ? "Hủy báo giá (Hết hạn)" : "Khách từ chối"}>
                   <Button type="text" danger icon={<CloseCircleOutlined />} onClick={() => handleXacNhan(id, 'REJECTED')} />
                 </Tooltip>
               </>

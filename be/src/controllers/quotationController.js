@@ -1,7 +1,33 @@
 const Quotation = require('../models/quotationModel');
 const Pricing = require('../models/pricingModel'); // Import model Bảng Giá để tra cứu
 const puppeteer = require('puppeteer');
+const db = require('../config/database'); // THÊM DÒNG NÀY ĐỂ QUERY CÔNG NỢ
 
+
+// ĐÂY LÀ CÂU QUERY THẦN THÁNH TÍNH CÔNG NỢ ĐỘNG
+const queryCongNo = `
+  SELECT 
+    kh.han_muc_cong_no,
+    (
+      -- Tổng nợ (Từ các vận đơn CONFIRMED)
+      COALESCE((
+        SELECT SUM(v.gia_tri) 
+        FROM van_dons v
+        JOIN bao_gia_chi_tiets bct ON v.bao_gia_chi_tiet_id = bct.id
+        JOIN bao_gias bg ON bct.bao_gia_id = bg.id
+        WHERE bg.khach_hang_id = kh.id AND v.trang_thai = 'CONFIRMED'
+      ), 0)
+      - 
+      -- Tổng đã thanh toán (Từ phiếu thu)
+      COALESCE((
+        SELECT SUM(pt.tong_so_tien) 
+        FROM phieu_thus pt 
+        WHERE pt.khach_hang_id = kh.id
+      ), 0)
+    ) AS cong_no_hien_tai
+  FROM khach_hangs kh
+  WHERE kh.id = ?
+`;
 
 const getQuotations = async (req, res) => {
   try {
@@ -34,26 +60,38 @@ const createQuotation = async (req, res) => {
     let tongGiaTri = 0;
     const processedChiTiet = [];
 
-    // 1. Lặp qua từng dòng chi tiết để tra giá
     for (const item of chiTiet) {
       const { tuyenDuongId, loaiHangId, trongLuong } = item;
       
       const priceResult = await Pricing.lookupPrice(tuyenDuongId, loaiHangId, trongLuong);
       if (!priceResult) {
-        return res.status(404).json({ 
-          success: false, 
-          error: { code: 'GIA_KHONG_TIM_THAY', message: `Không tìm thấy bảng giá phù hợp cho Tuyến ${tuyenDuongId}, Loại hàng ${loaiHangId}, Nặng ${trongLuong}kg` } 
-        });
+        return res.status(404).json({ success: false, error: { code: 'GIA_KHONG_TIM_THAY', message: `Không tìm thấy bảng giá phù hợp` } });
       }
 
       const donGiaApDung = priceResult.donGia;
       const thanhTien = Number(donGiaApDung) * Number(trongLuong);
       tongGiaTri += thanhTien;
-
       processedChiTiet.push({ ...item, donGiaApDung, thanhTien });
     }
 
-    // 2. Nếu tất cả đều có giá -> Lưu vào DB (Transaction)
+    // BỨC TƯỜNG THÉP: Dùng câu Query tính công nợ động
+    const [khRows] = await db.query(queryCongNo, [khachHangId]);
+    
+    if (khRows.length > 0) {
+      const hanMuc = Number(khRows[0].han_muc_cong_no) || 0;
+      const noHienTai = Number(khRows[0].cong_no_hien_tai) || 0;
+
+      if (hanMuc > 0 && (noHienTai + tongGiaTri > hanMuc)) {
+        return res.status(422).json({
+          success: false,
+          error: {
+            code: 'VUOT_HAN_MUC_CONG_NO',
+            message: `LỖI: Báo giá mới (${tongGiaTri.toLocaleString('vi-VN')}đ) + Nợ hiện tại (${noHienTai.toLocaleString('vi-VN')}đ) đã vượt Hạn mức (${hanMuc.toLocaleString('vi-VN')}đ).`
+          }
+        });
+      }
+    }
+
     const userId = req.user.id; 
     const id = await Quotation.createWithDetails(khachHangId, ngayHetHan, ghiChu, tongGiaTri, processedChiTiet, userId);
 
@@ -67,15 +105,55 @@ const createQuotation = async (req, res) => {
 const updateQuotation = async (req, res) => {
   try {
     const { id } = req.params;
+    const { ngayHetHan, ghiChu, chiTiet } = req.body; 
+
     const quotation = await Quotation.findById(id);
 
-    if (!quotation) return res.status(404).json({ success: false, message: 'Không tìm thấy' });
+    if (!quotation) return res.status(404).json({ success: false, message: 'Không tìm thấy báo giá' });
     if (quotation.trang_thai !== 'DRAFT') {
-      return res.status(422).json({ success: false, error: { code: 'KHONG_THE_THAO_TAC', message: 'Chỉ được sửa báo giá ở trạng thái DRAFT' } });
+      return res.status(422).json({ success: false, error: { code: 'KHONG_THE_THAO_TAC', message: 'Chỉ được sửa báo giá DRAFT' } });
     }
 
-    await Quotation.update(id, req.body);
-    res.json({ success: true, message: 'Cập nhật thành công' });
+    if (!chiTiet || !Array.isArray(chiTiet) || chiTiet.length === 0) {
+       await Quotation.update(id, req.body);
+       return res.json({ success: true, message: 'Cập nhật thành công' });
+    }
+
+    let tongGiaTri = 0;
+    const processedChiTiet = [];
+
+    for (const item of chiTiet) {
+      const { tuyenDuongId, loaiHangId, trongLuong } = item;
+      const priceResult = await Pricing.lookupPrice(tuyenDuongId, loaiHangId, trongLuong);
+      if (!priceResult) return res.status(404).json({ success: false, error: { code: 'GIA_KHONG_TIM_THAY', message: `Lỗi tra giá` } });
+
+      const donGiaApDung = priceResult.donGia;
+      const thanhTien = Number(donGiaApDung) * Number(trongLuong);
+      tongGiaTri += thanhTien;
+      processedChiTiet.push({ ...item, donGiaApDung, thanhTien });
+    }
+
+    // BỨC TƯỜNG THÉP LÚC UPDATE:
+    const [khRows] = await db.query(queryCongNo, [quotation.khach_hang_id]);
+    
+    if (khRows.length > 0) {
+      const hanMuc = Number(khRows[0].han_muc_cong_no) || 0;
+      const noHienTai = Number(khRows[0].cong_no_hien_tai) || 0;
+
+      if (hanMuc > 0 && (noHienTai + tongGiaTri > hanMuc)) {
+        return res.status(422).json({
+          success: false,
+          error: {
+            code: 'VUOT_HAN_MUC_CONG_NO',
+            message: `LỖI: Báo giá sau cập nhật (${tongGiaTri.toLocaleString('vi-VN')}đ) + Nợ hiện tại (${noHienTai.toLocaleString('vi-VN')}đ) đã vượt Hạn mức!`
+          }
+        });
+      }
+    }
+
+    await Quotation.updateWithDetails(id, ngayHetHan, ghiChu, tongGiaTri, processedChiTiet);
+
+    res.json({ success: true, message: 'Cập nhật báo giá thành công', data: { tongGiaTri } });
   } catch (error) {
     res.status(500).json({ success: false, error: { message: error.message } });
   }
@@ -207,5 +285,7 @@ const exportPdf = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+
 
 module.exports = { getQuotations, getQuotationById, createQuotation, updateQuotation, sendQuotation, confirmQuotation, exportPdf };

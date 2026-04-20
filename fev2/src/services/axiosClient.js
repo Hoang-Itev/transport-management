@@ -20,11 +20,15 @@ axiosClient.interceptors.request.use((config) => {
 axiosClient.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    if (error.response?.status === 401) {
+    // 🚀 FIX LỖI TẠI ĐÂY: Thêm điều kiện KHÔNG PHẢI api '/login' thì mới reload trang
+    const isLoginApi = error.config?.url?.includes('/login');
+    
+    if (error.response?.status === 401 && !isLoginApi) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';
     }
+    
     return Promise.reject(error.response?.data || error);
   }
 );

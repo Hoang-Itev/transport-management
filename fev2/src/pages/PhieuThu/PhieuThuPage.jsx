@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Select, Button, Table, Space, Typography, DatePicker, message, Tooltip, Modal } from 'antd';
-import { PlusOutlined, EyeOutlined } from '@ant-design/icons';
+import { PlusOutlined, EyeOutlined, PrinterOutlined } from '@ant-design/icons'; // Thêm PrinterOutlined
 import { useNavigate } from 'react-router-dom';
 
 import { phieuThuService } from '../../services/phieuThuService';
@@ -21,12 +21,10 @@ const PhieuThuPage = () => {
   const [data, setData] = useState([]);
   const [khachHangList, setKhachHangList] = useState([]);
 
-  // Bộ lọc
   const [khachHangId, setKhachHangId] = useState(null);
   const [hinhThuc, setHinhThuc] = useState(null);
   const [dateRange, setDateRange] = useState([]);
 
-  // Modal Chi tiết
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedPhieu, setSelectedPhieu] = useState(null);
 
@@ -56,6 +54,17 @@ const PhieuThuPage = () => {
     } catch (error) { message.error('Lỗi tải chi tiết phiếu thu'); }
   };
 
+  // 🚀 HÀM TẢI PDF PHIẾU THU
+  const handleDownloadPdf = async (id) => {
+    try {
+      message.loading({ content: 'Đang tạo Phiếu thu PDF...', key: 'pdf_pt' });
+      await phieuThuService.exportPdf(id);
+      message.success({ content: 'Đã tải Phiếu thu PDF!', key: 'pdf_pt' });
+    } catch (error) {
+      message.error({ content: 'Lỗi khi tải PDF (Có thể do Backend chưa hỗ trợ)', key: 'pdf_pt' });
+    }
+  };
+
   const columns = [
     { title: 'Mã PT', dataIndex: 'id', render: (val) => `PT-${val}` },
     { title: 'Khách hàng', render: (_, r) => r.ten_cong_ty || `ID: ${r.khach_hang_id}` },
@@ -63,9 +72,14 @@ const PhieuThuPage = () => {
     { title: 'Hình thức', dataIndex: 'hinh_thuc' },
     { title: 'Tổng số tiền', dataIndex: 'tong_so_tien', align: 'right', render: (val) => <CurrencyText value={val} style={{ color: '#52c41a', fontWeight: 'bold' }} /> },
     { title: 'Thao tác', align: 'center', render: (_, record) => (
-        <Tooltip title="Xem chi tiết phân bổ">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => xemChiTiet(record.id)} />
-        </Tooltip>
+        <Space>
+          <Tooltip title="Xem chi tiết phân bổ">
+            <Button type="text" icon={<EyeOutlined />} onClick={() => xemChiTiet(record.id)} />
+          </Tooltip>
+          <Tooltip title="In Phiếu Thu">
+            <Button type="text" style={{color: '#722ed1'}} icon={<PrinterOutlined />} onClick={() => handleDownloadPdf(record.id)} />
+          </Tooltip>
+        </Space>
       )
     }
   ];
@@ -78,7 +92,17 @@ const PhieuThuPage = () => {
       </div>
 
       <Space style={{ marginBottom: 16 }} wrap>
-        <Select showSearch placeholder="Khách hàng" style={{ width: 200 }} allowClear onChange={setKhachHangId} optionFilterProp="children" options={khachHangList.map(kh => ({ value: kh.id, label: kh.ten_cong_ty }))} />
+        {/* 🚀 FIX LỖI TÌM KIẾM KHÁCH HÀNG Ở ĐÂY NỮA */}
+        <Select 
+          showSearch 
+          placeholder="Khách hàng" 
+          style={{ width: 200 }} 
+          allowClear 
+          onChange={setKhachHangId} 
+          optionFilterProp="label" 
+          filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+          options={khachHangList.map(kh => ({ value: kh.id, label: kh.ten_cong_ty }))} 
+        />
         <Select placeholder="Hình thức" style={{ width: 150 }} allowClear onChange={setHinhThuc}>
           <Option value="CHUYEN_KHOAN">Chuyển khoản</Option>
           <Option value="TIEN_MAT">Tiền mặt</Option>

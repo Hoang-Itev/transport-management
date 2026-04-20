@@ -22,12 +22,17 @@ const LoginPage = () => {
         login(response.data.token, response.data.user);
       }
     } catch (error) {
-      // Bắt mã lỗi từ backend
+      // 🚀 BỌC THÉP LẠI PHẦN BẮT LỖI
       const code = error?.error?.code;
+      const messageFallback = error?.error?.message || error?.message;
+
       if (code === 'INVALID_CREDENTIALS') {
         setErrorMsg('Tên đăng nhập hoặc mật khẩu không chính xác.');
       } else if (code === 'ACCOUNT_LOCKED') {
         setErrorMsg('Tài khoản đã bị khóa do đăng nhập sai quá nhiều lần.');
+      } else if (messageFallback) {
+        // Nếu backend không trả code mà chỉ trả message thì in thẳng message ra
+        setErrorMsg(messageFallback);
       } else {
         setErrorMsg('Lỗi kết nối máy chủ. Vui lòng thử lại sau.');
       }

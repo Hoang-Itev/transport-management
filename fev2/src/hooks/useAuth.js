@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 export const useAuth = () => {
@@ -12,7 +12,18 @@ export const useAuth = () => {
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(userData));
     setUser(userData);
-    navigate('/'); // Chuyển về Dashboard sau khi log in thành công
+    
+    // FIX: Tùy theo Role mà đẩy về trang chủ (Homepage) tương ứng
+    const role = userData.vai_tro || userData.vaiTro;
+    if (role === 'MANAGER') {
+      navigate('/'); // Về Dashboard
+    } else if (role === 'SALE') {
+      navigate('/bao-gia'); 
+    } else if (role === 'KE_TOAN') {
+      navigate('/phieu-thu');
+    } else {
+      navigate('/van-don');
+    }
   };
 
   const logout = () => {

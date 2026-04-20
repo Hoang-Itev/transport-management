@@ -1,24 +1,59 @@
 const db = require('../config/database');
 
 const Customer = {
-  // 1. Lấy danh sách có phân trang và tìm kiếm (Đã bọc Number chống lỗi 500)
+  // 1. Lấy danh sách có phân trang và tìm kiếm (Kèm theo tính CÔNG NỢ ĐỘNG)
   findAll: async ({ page, limit, search, isActive }) => {
     const offset = (page - 1) * limit;
     const params = [];
 
-    let baseQuery = `FROM khach_hangs WHERE 1=1`;
+    // Đặt bí danh 'kh' cho bảng khach_hangs để dễ gọi trong Subquery
+    let baseQuery = `FROM khach_hangs kh WHERE 1=1`;
 
     if (search) {
-      baseQuery += ` AND (ten_cong_ty LIKE ? OR ma_so_thue LIKE ?)`;
+      baseQuery += ` AND (kh.ten_cong_ty LIKE ? OR kh.ma_so_thue LIKE ?)`;
       params.push(`%${search}%`, `%${search}%`);
     }
 
     if (isActive !== undefined) {
-      baseQuery += ` AND is_active = ?`;
+      baseQuery += ` AND kh.is_active = ?`;
       params.push(isActive === 'true' || isActive === true ? 1 : 0);
     }
 
-    const selectQuery = `SELECT * ${baseQuery} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    // FIX: Nhúng Subquery tính công nợ hiện tại vào câu SELECT
+    // FIX: Bổ sung thêm đếm "so_don_qua_han" vào câu SELECT
+    const selectQuery = `
+      SELECT 
+        kh.*,
+        (
+          COALESCE((
+            SELECT SUM(v.gia_tri) 
+            FROM van_dons v JOIN bao_gia_chi_tiets bct ON v.bao_gia_chi_tiet_id = bct.id JOIN bao_gias bg ON bct.bao_gia_id = bg.id 
+            WHERE bg.khach_hang_id = kh.id AND v.trang_thai = 'CONFIRMED'
+          ), 0)
+          - 
+          COALESCE((
+            SELECT SUM(pt.tong_so_tien) 
+            FROM phieu_thus pt WHERE pt.khach_hang_id = kh.id
+          ), 0)
+        ) AS cong_no_hien_tai,
+        
+        -- THÊM ĐOẠN NÀY ĐỂ ĐẾM SỐ ĐƠN QUÁ HẠN:
+        (
+          SELECT COUNT(*)
+          FROM van_dons v2
+          JOIN bao_gia_chi_tiets bct2 ON v2.bao_gia_chi_tiet_id = bct2.id
+          JOIN bao_gias bg2 ON bct2.bao_gia_id = bg2.id
+          WHERE bg2.khach_hang_id = kh.id 
+            AND v2.ngay_het_han_thanh_toan < CURDATE() 
+            AND v2.trang_thai_thanh_toan != 'PAID'
+            AND v2.trang_thai != 'CANCELLED'
+        ) AS so_don_qua_han
+
+      ${baseQuery} 
+      ORDER BY kh.created_at DESC 
+      LIMIT ? OFFSET ?
+    `;
+    
     const countQuery = `SELECT COUNT(*) as total ${baseQuery}`;
 
     const [rows] = await db.query(selectQuery, [...params, Number(limit), Number(offset)]);
@@ -40,18 +75,27 @@ const Customer = {
     return rows[0] || null;
   },
 
-  // 3. Tính công nợ hiện tại (Phải JOIN qua bao_gia_chi_tiets -> bao_gias để lấy đúng khách)
+  // 3. FIX: Tính công nợ hiện tại (Đồng bộ chuẩn công thức: Tổng Vận Đơn - Tổng Phiếu Thu)
   getCongNoHienTai: async (id) => {
     const query = `
-      SELECT COALESCE(SUM(vd.gia_tri), 0) AS congNo
-      FROM van_dons vd
-      JOIN bao_gia_chi_tiets ct ON vd.bao_gia_chi_tiet_id = ct.id
-      JOIN bao_gias bg ON ct.bao_gia_id = bg.id
-      WHERE bg.khach_hang_id = ?
-        AND vd.trang_thai != 'CANCELLED'
-        AND vd.trang_thai_thanh_toan != 'PAID'
+      SELECT 
+        (
+          COALESCE((
+            SELECT SUM(v.gia_tri) 
+            FROM van_dons v 
+            JOIN bao_gia_chi_tiets bct ON v.bao_gia_chi_tiet_id = bct.id 
+            JOIN bao_gias bg ON bct.bao_gia_id = bg.id 
+            WHERE bg.khach_hang_id = ? AND v.trang_thai = 'CONFIRMED'
+          ), 0)
+          - 
+          COALESCE((
+            SELECT SUM(pt.tong_so_tien) 
+            FROM phieu_thus pt 
+            WHERE pt.khach_hang_id = ?
+          ), 0)
+        ) AS congNo
     `;
-    const [rows] = await db.query(query, [id]);
+    const [rows] = await db.query(query, [id, id]);
     return Number(rows[0].congNo);
   },
 

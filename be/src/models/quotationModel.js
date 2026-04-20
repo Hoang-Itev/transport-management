@@ -129,6 +129,42 @@ const Quotation = {
 
     quotation.details = details;
     return quotation;
+  },
+
+  // Thêm đoạn này vào dưới cùng của Object Quotation
+  
+  // ⚠️ NGHIỆP VỤ LÕI: TRANSACTION CẬP NHẬT BÁO GIÁ (XÓA CŨ - THÊM MỚI)
+  updateWithDetails: async (id, ngayHetHan, ghiChu, tongGiaTri, chiTietList) => {
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // 1. Cập nhật bảng cha (bao_gias) với tổng tiền mới
+      await connection.query(
+        `UPDATE bao_gias SET ngay_het_han = ?, ghi_chu = ?, tong_gia_tri = ? WHERE id = ?`,
+        [ngayHetHan, ghiChu, tongGiaTri, id]
+      );
+
+      // 2. Xóa SACH các chi tiết cũ của báo giá này
+      await connection.query(`DELETE FROM bao_gia_chi_tiets WHERE bao_gia_id = ?`, [id]);
+
+      // 3. Thêm lại toàn bộ chi tiết mới (đã được tra giá lại)
+      for (const item of chiTietList) {
+        await connection.query(
+          `INSERT INTO bao_gia_chi_tiets (bao_gia_id, tuyen_duong_id, loai_hang_id, dia_chi_lay_hang, dia_chi_giao_hang, trong_luong, don_gia_ap_dung, thanh_tien, ghi_chu) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, item.tuyenDuongId, item.loaiHangId, item.diaChiLayHang, item.diaChiGiaoHang, item.trongLuong, item.donGiaApDung, item.thanhTien, item.ghiChu || item.ghi_chu || null]
+        );
+      }
+
+      await connection.commit();
+      return true;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
 };

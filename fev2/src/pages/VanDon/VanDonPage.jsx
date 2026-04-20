@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Select, Button, Table, Space, Typography, DatePicker, Checkbox, message, Tooltip, Modal, Form, InputNumber, Input, Tag } from 'antd';
-import { EyeOutlined, EditOutlined, CloseOutlined, PlusOutlined, FileDoneOutlined } from '@ant-design/icons';
+import { EyeOutlined, EditOutlined, CloseOutlined, PlusOutlined, FileDoneOutlined, SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import dayjs from 'dayjs';
 
 import { vanDonService } from '../../services/vanDonService';
 import { khachHangService } from '../../services/khachHangService';
@@ -38,6 +39,7 @@ const VanDonPage = () => {
   const [pendingModalVisible, setPendingModalVisible] = useState(false);
   const [pendingList, setPendingList] = useState([]);
   const [loadingPending, setLoadingPending] = useState(false);
+  const [pendingSearch, setPendingSearch] = useState(''); // FIX: Thêm state lưu từ khóa tìm kiếm khách hàng
 
   // Modal Tạo Vận Đơn
   const [createModalVisible, setCreateModalVisible] = useState(false);
@@ -102,8 +104,9 @@ const VanDonPage = () => {
   const openPendingList = async () => {
     setPendingModalVisible(true);
     setLoadingPending(true);
+    setPendingSearch(''); // Reset tìm kiếm mỗi khi mở lại modal
     try {
-      const res = await vanDonService.getPendingList(); // Cần gọi đúng hàm bạn vừa tạo ở Service
+      const res = await vanDonService.getPendingList(); 
       setPendingList(res.data);
     } catch (error) {
       message.error('Không thể tải danh sách chờ');
@@ -114,23 +117,25 @@ const VanDonPage = () => {
 
   const startCreateVanDon = (trip) => {
     setSelectedTrip(trip);
-    setPendingModalVisible(false); // Đóng bảng chọn
-    setCreateModalVisible(true);   // Mở form nhập
+    setPendingModalVisible(false); 
+    setCreateModalVisible(true);   
   };
 
   const submitCreateVanDon = async (values) => {
     try {
       const payload = {
-        baoGiaChiTietId: selectedTrip.bao_gia_chi_tiet_id,
+        baoGiaChiTietId: selectedTrip ? selectedTrip.bao_gia_chi_tiet_id : selectedChiTietId,
         nguoiLienHeLay: values.nguoiLienHeLay,
         nguoiLienHeGiao: values.nguoiLienHeGiao,
-        ngayVanChuyen: values.ngayVanChuyen.format('YYYY-MM-DD')
+        ngayVanChuyen: values.ngayVanChuyen.format('YYYY-MM-DD'),
+        // THÊM DÒNG NÀY:
+        ngayHetHanThanhToan: values.ngayHetHanThanhToan.format('YYYY-MM-DD') 
       };
       await vanDonService.create(payload);
       message.success('Tạo Vận đơn thành công!');
       setCreateModalVisible(false);
       createForm.resetFields();
-      fetchData(); // Tải lại bảng vận đơn chính
+      fetchData(); 
     } catch (error) {
       message.error(error?.error?.message || 'Lỗi khi tạo vận đơn');
     }
@@ -139,7 +144,16 @@ const VanDonPage = () => {
   const columns = [
     { title: 'Mã VĐ', dataIndex: 'id', render: (val) => <span style={{fontWeight: 500}}>{val}</span> },
     { title: 'Khách', dataIndex: 'ten_cong_ty' }, 
-    { title: 'Ngày VC', dataIndex: 'ngay_van_chuyen', render: (val) => formatDate(val) },
+    // THAY BẰNG DÒNG NÀY:
+    { 
+      title: 'Hạn TT', 
+      dataIndex: 'ngay_het_han_thanh_toan', 
+      render: (val, record) => {
+        // Nếu chưa thanh toán xong và ngày hiện tại đã lố ngày hạn -> Tô đỏ
+        const isOverdue = record.trang_thai_thanh_toan !== 'PAID' && dayjs().startOf('day').isAfter(dayjs(val), 'day');
+        return <Text type={isOverdue ? 'danger' : ''} strong={isOverdue}>{formatDate(val)}</Text>;
+      }
+    },
     { title: 'Giá trị', dataIndex: 'gia_tri', align: 'right', render: (val) => <CurrencyText value={val} /> },
     { 
       title: 'TT TT', 
@@ -207,8 +221,21 @@ const VanDonPage = () => {
 
       {/* 1. Modal Danh sách chờ tạo VĐ */}
       <Modal title="Chọn Chuyến hàng để tạo Vận Đơn" open={pendingModalVisible} onCancel={() => setPendingModalVisible(false)} footer={null} width={900} destroyOnClose>
+        
+        {/* FIX: Thêm thanh tìm kiếm khách hàng */}
+        <Input
+          placeholder="Gõ tên khách hàng để tìm nhanh..."
+          prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+          style={{ width: 300, marginBottom: 16 }}
+          allowClear
+          onChange={(e) => setPendingSearch(e.target.value)}
+        />
+
         <Table 
-          dataSource={pendingList} 
+          // FIX: Filter dữ liệu ngay tại Frontend dựa trên từ khóa tìm kiếm
+          dataSource={pendingList.filter(item => 
+            item.ten_cong_ty?.toLowerCase().includes(pendingSearch.toLowerCase())
+          )} 
           rowKey="bao_gia_chi_tiet_id" 
           loading={loadingPending}
           pagination={{ pageSize: 5 }}
@@ -237,14 +264,21 @@ const VanDonPage = () => {
           </div>
         )}
         <Form form={createForm} layout="vertical" onFinish={submitCreateVanDon}>
-          <Form.Item name="ngayVanChuyen" label="Ngày vận chuyển (Dự kiến đi)" rules={[{ required: true }]}>
+          <Form.Item name="ngayVanChuyen" label="Ngày vận chuyển (Dự kiến đi)" rules={[{ required: true, message: 'Vui lòng chọn ngày đi' }]}>
             <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
           </Form.Item>
-          <Form.Item name="nguoiLienHeLay" label="Thông tin người lấy hàng" rules={[{ required: true }]}>
+          
+          <Form.Item name="nguoiLienHeLay" label="Thông tin người lấy hàng" rules={[{ required: true, message: 'Vui lòng nhập người lấy' }]}>
             <Input placeholder="Tên và SĐT người ở kho bốc..." />
           </Form.Item>
-          <Form.Item name="nguoiLienHeGiao" label="Thông tin người nhận hàng" rules={[{ required: true }]}>
+          
+          {/* ĐÂY LÀ Ô ĐÃ BỊ THIẾU NÈ BẠN: */}
+          <Form.Item name="nguoiLienHeGiao" label="Thông tin người nhận hàng" rules={[{ required: true, message: 'Vui lòng nhập người nhận' }]}>
             <Input placeholder="Tên và SĐT người nhận hàng..." />
+          </Form.Item>
+          
+          <Form.Item name="ngayHetHanThanhToan" label="Hạn chót thanh toán" rules={[{ required: true, message: 'Vui lòng chọn hạn thanh toán' }]}>
+            <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
           </Form.Item>
         </Form>
       </Modal>

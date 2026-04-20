@@ -18,13 +18,11 @@ const PhieuThuForm = () => {
   const [loading, setLoading] = useState(false);
 
   const [khachHangList, setKhachHangList] = useState([]);
-  const [vanDonList, setVanDonList] = useState([]); // Chứa danh sách VĐ chưa thanh toán xong
+  const [vanDonList, setVanDonList] = useState([]); 
 
-  // State tính toán phân bổ
   const [tongTienPhieu, setTongTienPhieu] = useState(0);
-  const [allocations, setAllocations] = useState({}); // { [vanDonId]: amount }
+  const [allocations, setAllocations] = useState({}); 
 
-  // HÀM MỚI: Tự động sinh mã giao dịch
   const generateRefCode = (hinhThuc) => {
     const prefix = hinhThuc === 'TIEN_MAT' ? 'TM' : 'CK';
     const randomStr = Math.floor(1000 + Math.random() * 9000);
@@ -35,7 +33,6 @@ const PhieuThuForm = () => {
     khachHangService.getList({ limit: 1000 }).then(res => setKhachHangList(res.data));
   }, []);
 
-  // Khi chọn khách hàng -> Load các Vận đơn của khách đó (Chỉ lấy CONFIRMED và chưa PAID)
   const handleKhachHangChange = async (khachHangId) => {
     setAllocations({});
     setVanDonList([]);
@@ -44,10 +41,8 @@ const PhieuThuForm = () => {
     try {
       const res = await vanDonService.getList({ khachHangId, trangThai: 'CONFIRMED', limit: 1000 });
       if (res.success) {
-        // Lọc bỏ những VĐ đã PAID hoặc CANCELLED
         const unpaids = res.data.filter(vd => vd.trang_thai_thanh_toan !== 'PAID');
         
-        // Tính toán số tiền CÒN LẠI cần thu của từng Vận đơn (Lưu thêm daThu để hiển thị)
         const processed = unpaids.map(vd => {
           const daThu = Number(vd.da_thu || 0);
           return {
@@ -61,17 +56,35 @@ const PhieuThuForm = () => {
     } catch (error) { message.error('Lỗi tải danh sách vận đơn'); }
   };
 
-  // --- LOGIC TICK CHỌN VÀ NHẬP TIỀN PHÂN BỔ ---
-  const tongPhanBo = Object.values(allocations).reduce((sum, val) => sum + (val || 0), 0);
-  const chenhLech = tongTienPhieu - tongPhanBo;
+  // 🚀 THUẬT TOÁN "RÓT NƯỚC": Tự động phân bổ lại khi người dùng sửa số Tổng Tiền Phiếu
+  useEffect(() => {
+    const checkedIds = Object.keys(allocations);
+    if (checkedIds.length === 0) return; // Chưa tick cái nào thì bỏ qua
+
+    let remaining = tongTienPhieu || 0;
+    const newAlloc = {};
+
+    // Duyệt qua các Vận đơn ĐANG ĐƯỢC TICK để rót tiền vào
+    checkedIds.forEach(vdId => {
+      const vd = vanDonList.find(v => v.id === vdId);
+      if (vd) {
+        // Lấy min giữa "Số tiền còn nợ của đơn này" và "Số tiền phiếu còn dư"
+        const amount = Math.min(vd.conLai, remaining > 0 ? remaining : 0);
+        newAlloc[vdId] = amount;
+        remaining -= amount; // Trừ dần số tiền phiếu
+      }
+    });
+
+    setAllocations(newAlloc);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tongTienPhieu]); // Kích hoạt mỗi khi gõ lại ô TỔNG SỐ TIỀN
 
   const handleTickVanDon = (vdId, checked, conLai) => {
     const newAlloc = { ...allocations };
     if (checked) {
-      // Nếu tick chọn: Gán số tiền tối đa có thể (Không vượt quá Còn lại của VĐ, và không vượt quá số Tiền phiếu còn dư)
-      const soTienDu = tongTienPhieu - tongPhanBo;
-      const tienCanDien = Math.min(conLai, soTienDu > 0 ? soTienDu : 0);
-      newAlloc[vdId] = tienCanDien;
+      const tongPhanBoHienTai = Object.values(newAlloc).reduce((sum, val) => sum + (val || 0), 0);
+      const soTienDu = tongTienPhieu - tongPhanBoHienTai;
+      newAlloc[vdId] = Math.min(conLai, soTienDu > 0 ? soTienDu : 0);
     } else {
       delete newAlloc[vdId];
     }
@@ -80,10 +93,12 @@ const PhieuThuForm = () => {
 
   const handleAmountChange = (vdId, val, conLai) => {
     const newAlloc = { ...allocations };
-    // Không cho phép nhập lố số tiền Còn lại của Vận đơn
     newAlloc[vdId] = val > conLai ? conLai : val;
     setAllocations(newAlloc);
   };
+
+  const tongPhanBo = Object.values(allocations).reduce((sum, val) => sum + (val || 0), 0);
+  const chenhLech = tongTienPhieu - tongPhanBo;
 
   const onFinish = async (values) => {
     if (tongTienPhieu <= 0) return message.warning('Vui lòng nhập Tổng số tiền > 0');
@@ -120,7 +135,6 @@ const PhieuThuForm = () => {
         <Title level={4} style={{ margin: 0 }}>Tạo Phiếu Thu Mới</Title>
       </div>
 
-      {/* CẬP NHẬT: initialValues để tự động điền Mã tham chiếu ngay khi mở trang */}
       <Form 
         form={form} 
         layout="vertical" 
@@ -135,8 +149,13 @@ const PhieuThuForm = () => {
         <Row gutter={24}>
           <Col span={8}>
             <Form.Item label="Khách hàng" name="khachHangId" rules={[{ required: true }]}>
-              <Select showSearch placeholder="Chọn khách hàng để load nợ..." 
-                optionFilterProp="children" onChange={handleKhachHangChange}
+              <Select 
+                showSearch 
+                placeholder="Chọn khách hàng để load nợ..." 
+                // 🚀 FIX LỖI TÌM KIẾM TẠI ĐÂY
+                optionFilterProp="label" 
+                filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+                onChange={handleKhachHangChange}
                 options={khachHangList.map(kh => ({ value: kh.id, label: kh.ten_cong_ty }))}
               />
             </Form.Item>
@@ -148,7 +167,6 @@ const PhieuThuForm = () => {
           </Col>
           <Col span={8}>
             <Form.Item label="Hình thức thanh toán" name="hinhThuc" rules={[{ required: true }]}>
-              {/* CẬP NHẬT: Khi đổi hình thức, tự động sinh lại mã tham chiếu cho phù hợp */}
               <Select placeholder="Chọn hình thức" onChange={(val) => form.setFieldsValue({ soThamChieu: generateRefCode(val) })}>
                 <Option value="CHUYEN_KHOAN">Chuyển khoản</Option>
                 <Option value="TIEN_MAT">Tiền mặt</Option>
@@ -164,7 +182,7 @@ const PhieuThuForm = () => {
           </Col>
           <Col span={8}>
             <Form.Item label="TỔNG SỐ TIỀN THU (VNĐ)" name="tongSoTien" rules={[{ required: true }]}>
-              <InputNumber style={{ width: '100%' }} min={1} size="large" onChange={setTongTienPhieu} />
+              <InputNumber style={{ width: '100%' }} min={1} size="large" onChange={(val) => setTongTienPhieu(val || 0)} />
             </Form.Item>
           </Col>
           <Col span={8}>
@@ -191,7 +209,6 @@ const PhieuThuForm = () => {
                     <Text strong>{vd.id}</Text>
                   </Checkbox>
                 </Col>
-                {/* CẬP NHẬT: Hiển thị thêm dòng "Đã thu" */}
                 <Col span={8}>
                   <div style={{ marginBottom: 4 }}>
                     <Text type="secondary" style={{ fontSize: 12 }}>Đã thu: </Text>
@@ -218,7 +235,6 @@ const PhieuThuForm = () => {
 
             <Divider style={{ margin: '16px 0' }}/>
             
-            {/* TỔNG KẾT BẢNG TÍNH */}
             <div style={{ fontSize: 16, lineHeight: '2' }}>
               <Row>
                 <Col span={16} style={{ textAlign: 'right', paddingRight: 16 }}><Text type="secondary">Tổng tiền trên Phiếu:</Text></Col>

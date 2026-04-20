@@ -3,8 +3,7 @@ const router = express.Router();
 const waybillController = require('../controllers/waybillController');
 const { verifyToken, authorize } = require('../middlewares/authMiddleware');
 
-// Route Internal API (Dùng API Key, không dùng Bearer Token chuẩn của User)
-// Giả sử bạn có middleware checkApiKey, ở đây mình tạm bỏ qua bước check đó để test
+// Route Internal API 
 router.get('/confirmed', waybillController.getConfirmedWaybills);
 
 // Các route bên dưới phải đăng nhập
@@ -13,10 +12,13 @@ router.use(verifyToken);
 router.get('/', authorize('MANAGER', 'SALE', 'KE_TOAN'), waybillController.getWaybills);
 router.post('/', authorize('MANAGER', 'SALE'), waybillController.createWaybill);
 
-// ⚠️ MỚI THÊM: Route lấy danh sách chờ (Bắt buộc phải nằm trên route /:id)
+// Tuyến này lấy danh sách chờ
 router.get('/pending', authorize('MANAGER', 'SALE', 'KE_TOAN'), waybillController.getPendingWaybills);
 
-// ⚠️ Phải nằm dưới /confirmed
+// ⚠️ MỚI THÊM: Route xuất PDF (Phải để trước route /:id nếu không nó tưởng "xuat-pdf" là cái ID vận đơn)
+router.get('/:id/xuat-pdf', authorize('MANAGER', 'SALE', 'KE_TOAN'), waybillController.exportPdf);
+
+// ⚠️ Tuyến lấy ID chi tiết
 router.get('/:id', authorize('MANAGER', 'SALE', 'KE_TOAN'), waybillController.getWaybillById);
 
 // Các thao tác nghiệp vụ

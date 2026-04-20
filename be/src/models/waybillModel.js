@@ -17,13 +17,16 @@ const Waybill = {
     if (trangThai) { baseQuery += ` AND vd.trang_thai = ?`; params.push(trangThai); }
     if (trangThaiThanhToan) { baseQuery += ` AND vd.trang_thai_thanh_toan = ?`; params.push(trangThaiThanhToan); }
     if (tuNgay && denNgay) { baseQuery += ` AND vd.ngay_van_chuyen BETWEEN ? AND ?`; params.push(tuNgay, denNgay); }
-    if (quaHan === 'true') { baseQuery += ` AND vd.ngay_het_han_thanh_toan < CURDATE() AND vd.trang_thai_thanh_toan != 'PAID'`; }
+    
+    // FIX: Sửa lại điều kiện check quaHan cho an toàn (chống lỗi string/boolean) và loại trừ đơn đã hủy
+    if (String(quaHan) === 'true') { 
+      baseQuery += ` AND vd.ngay_het_han_thanh_toan < CURDATE() AND vd.trang_thai_thanh_toan != 'PAID' AND vd.trang_thai != 'CANCELLED'`; 
+    }
 
     const selectQuery = `
       SELECT 
         vd.*, 
         kh.ten_cong_ty,
-        -- Lấy thêm tổng tiền đã thu của vận đơn này
         COALESCE((SELECT SUM(so_tien_phan_bo) FROM phieu_thu_chi_tiets WHERE van_don_id = vd.id), 0) AS da_thu
       ${baseQuery} 
       ORDER BY vd.ngay_tao DESC 
@@ -37,7 +40,6 @@ const Waybill = {
     return { data: rows, pagination: { total: count[0].total, page: Number(page), limit: Number(limit) } };
   },
 
-  // ĐÃ UPDATE: Lấy chi tiết Vận Đơn kèm Lịch sử Phiếu thu
   findById: async (id) => {
     const [vdRows] = await db.query(
       `SELECT vd.*, kh.ten_cong_ty, bg.khach_hang_id
@@ -149,7 +151,6 @@ const Waybill = {
     );
   },
 
-  // ĐÃ UPDATE: Hàm Lấy danh sách Vận đơn chờ (Đảm bảo nằm gọn trong object Waybill)
   getPendingBaoGiaChiTiet: async () => {
     const [rows] = await db.query(
       `SELECT 
@@ -171,7 +172,8 @@ const Waybill = {
         AND ct.id NOT IN (
             SELECT bao_gia_chi_tiet_id 
             FROM van_dons 
-            WHERE trang_thai != 'CANCELLED'
+            -- FIX: Đã bỏ đi dòng WHERE trang_thai != 'CANCELLED'
+            -- Nghĩa là: Cứ có Vận đơn (dù bị hủy) thì không cho phép hiển thị tạo lại nữa!
         )
       ORDER BY bg.created_at DESC`
     );

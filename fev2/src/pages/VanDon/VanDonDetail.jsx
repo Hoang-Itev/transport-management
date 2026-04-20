@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Button, Row, Col, Space, Typography, message, Modal, Form, Input, InputNumber, Divider, Spin, Table } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, CloseOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, EditOutlined, CloseOutlined, PrinterOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { vanDonService } from '../../services/vanDonService';
@@ -58,6 +58,16 @@ const VanDonDetail = () => {
     } catch (error) { message.error(error?.error?.message || 'Không thể hủy vận đơn này'); }
   };
 
+  const handleDownloadPdf = async () => {
+    try {
+      message.loading({ content: 'Đang tạo file PDF...', key: 'pdf_vd' });
+      await vanDonService.exportPdf(id);
+      message.success({ content: 'Đã tải Vận đơn PDF!', key: 'pdf_vd' });
+    } catch (error) {
+      message.error({ content: 'Lỗi khi tải PDF', key: 'pdf_vd' });
+    }
+  };
+
   if (loading) return <div style={{ textAlign: 'center', padding: 50 }}><Spin size="large" /></div>;
   if (!data) return null;
 
@@ -83,6 +93,11 @@ const VanDonDetail = () => {
         
         {canModify && (
           <Space>
+            {/* NÚT MỚI THÊM */}
+            <Button type="primary" icon={<PrinterOutlined />} onClick={handleDownloadPdf} style={{ backgroundColor: '#722ed1' }}>
+              In Vận Đơn (PDF)
+            </Button>
+            
             <Button icon={<EditOutlined />} onClick={() => {
               weightForm.setFieldsValue({ trongLuongThucTe: data.trong_luong_thuc_te || data.trong_luong_du_kien });
               setIsWeightModalVisible(true);

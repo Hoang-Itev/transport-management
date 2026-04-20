@@ -133,20 +133,20 @@ const BangGiaPage = () => {
       title: 'Từ (Kg)', 
       dataIndex: 'kg_tu', 
       align: 'right',
-      sorter: (a, b) => Number(a.kg_tu) - Number(b.kg_tu) // THÊM SẮP XẾP
+      sorter: (a, b) => Number(a.kg_tu) - Number(b.kg_tu) 
     },
     { 
       title: 'Đến (Kg)', 
       dataIndex: 'kg_den', 
       align: 'right',
-      sorter: (a, b) => Number(a.kg_den) - Number(b.kg_den) // THÊM SẮP XẾP
+      sorter: (a, b) => Number(a.kg_den) - Number(b.kg_den) 
     },
     { 
       title: 'Đơn giá', 
       dataIndex: 'don_gia', 
       align: 'right', 
       render: v => <CurrencyText value={v} />,
-      sorter: (a, b) => Number(a.don_gia) - Number(b.don_gia) // THÊM SẮP XẾP
+      sorter: (a, b) => Number(a.don_gia) - Number(b.don_gia) 
     },
     { 
       title: 'Hiệu lực', 
@@ -156,7 +156,23 @@ const BangGiaPage = () => {
       title: 'Trạng thái', 
       dataIndex: 'is_active',
       align: 'center', 
-      render: (val) => (Number(val) === 1 || val === true) ? <Tag color="success">Đang hoạt động</Tag> : <Tag color="default">Ngưng</Tag> 
+      render: (val, record) => {
+        // Lấy trạng thái hoạt động
+        const isActive = Number(val) === 1 || val === true;
+        
+        // Nếu đã bị ngưng (xóa mềm)
+        if (!isActive) {
+            return <Tag color="default">Ngưng</Tag>;
+        }
+
+        // FIX: Kiểm tra thêm logic Ngày hết hạn
+        if (record.ngay_het_han && dayjs().isAfter(dayjs(record.ngay_het_han), 'day')) {
+            return <Tag color="error">Hết hiệu lực</Tag>; // Quá hạn thì báo đỏ
+        }
+
+        // Đang hoạt động và trong thời hạn
+        return <Tag color="success">Đang hoạt động</Tag>;
+      } 
     },
     { 
       title: 'Thao tác', 
@@ -165,6 +181,7 @@ const BangGiaPage = () => {
         const isActive = Number(record.is_active) === 1 || record.is_active === true;
         return (
           <Space>
+            {/* Lưu ý: Dù hết hiệu lực thì vẫn nên cho sửa (để gia hạn), chỉ ẩn khi đã bị ngưng */}
             {isActive && (
               <>
                 <Button type="text" icon={<EditOutlined style={{ color: '#fa8c16' }}/>} onClick={() => openModal(record)} title="Sửa" />

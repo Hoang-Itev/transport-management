@@ -39,7 +39,13 @@ const CongNoPage = () => {
     }
   };
 
-  useEffect(() => { fetchList(); }, [page, limit, chiQuaHan, search]);
+  // FIX LỖI UX: Tự động reset Panel bên phải khi đổi trang hoặc thay đổi bộ lọc
+  useEffect(() => { 
+    fetchList(); 
+    setSelectedKh(null);
+    setDetailData(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, limit, chiQuaHan, search]); 
 
   // 2. Tải Chi tiết khi click vào Khách hàng
   const fetchDetail = async (khachHangId) => {
@@ -90,7 +96,7 @@ const CongNoPage = () => {
     }
   ];
 
-  // Tính tổng nợ toàn màn hình (Dựa trên data đang hiển thị)
+  // Tính tổng nợ (Chỉ của trang hiện tại đang hiển thị)
   const tongNoToanCuc = data.reduce((sum, item) => sum + Number(item.congNoHienTai || 0), 0);
 
   return (
@@ -98,7 +104,8 @@ const CongNoPage = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24, alignItems: 'center' }}>
         <Space size="large">
           <Title level={4} style={{ margin: 0 }}>Công nợ khách hàng</Title>
-          <Text style={{ fontSize: 16 }}>Tổng nợ: <CurrencyText value={tongNoToanCuc} style={{ color: '#cf1322', fontSize: 18, fontWeight: 'bold' }} /></Text>
+          {/* FIX LỖI LOGIC: Đổi nhãn để tránh gây hoang mang cho kế toán */}
+          <Text style={{ fontSize: 16 }}>Tổng nợ (Trang này): <CurrencyText value={tongNoToanCuc} style={{ color: '#cf1322', fontSize: 18, fontWeight: 'bold' }} /></Text>
         </Space>
         <Button type="primary" icon={<DownloadOutlined />} onClick={handleExport}>Xuất Báo Cáo Excel</Button>
       </div>
@@ -107,7 +114,6 @@ const CongNoPage = () => {
         {/* === CỘT TRÁI: DANH SÁCH KHÁCH HÀNG === */}
         <Col span={14}>
           <Space style={{ marginBottom: 16 }} wrap>
-            {/* FIX: Đổi từ Input thường sang Input.Search có nút bấm thực sự */}
             <Input.Search 
               placeholder="Tìm tên khách hàng..." 
               enterButton="Tìm kiếm"
@@ -115,7 +121,6 @@ const CongNoPage = () => {
               allowClear 
               onSearch={(value) => setSearch(value)}
               onChange={(e) => {
-                // Tự động load lại danh sách gốc nếu người dùng bấm nút "x" xóa trắng ô tìm kiếm
                 if (!e.target.value) {
                   setSearch('');
                 }

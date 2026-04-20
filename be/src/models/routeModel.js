@@ -79,6 +79,17 @@ const Route = {
     await db.query(`UPDATE bang_gia_cuocs SET is_active = 0 WHERE tuyen_duong_id = ?`, [id]);
     
     return true;
+  },
+
+  // ... các hàm cũ ở trên (create, update, softDelete...)
+
+  // THÊM HÀM NÀY VÀO DƯỚI CÙNG: Khôi phục lại tuyến đường đã bị ngưng hoạt động
+  reactivate: async (id, km) => {
+    await db.query(
+      `UPDATE tuyen_duongs SET is_active = 1, km = ? WHERE id = ?`,
+      [km, id]
+    );
+    return true;
   }
 };
 
