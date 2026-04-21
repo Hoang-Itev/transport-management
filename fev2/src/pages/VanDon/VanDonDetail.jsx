@@ -18,9 +18,9 @@ const VanDonDetail = () => {
   const [data, setData] = useState(null);
 
   // Modal State
-  const [isWeightModalVisible, setIsWeightModalVisible] = useState(false);
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [isCancelModalVisible, setIsCancelModalVisible] = useState(false);
-  const [weightForm] = Form.useForm();
+  const [editForm] = Form.useForm();
   const [cancelForm] = Form.useForm();
 
   const loadDetail = async () => {
@@ -39,12 +39,12 @@ const VanDonDetail = () => {
 
   useEffect(() => { loadDetail(); }, [id]);
 
-  // --- ACTIONS ---
-  const handleUpdateWeight = async (values) => {
+  // 🚀 FIX: Gọi API Cập nhật chung
+  const handleUpdate = async (values) => {
     try {
-      await vanDonService.updateTrongLuong(id, values.trongLuongThucTe);
-      message.success('Cập nhật trọng lượng thành công');
-      setIsWeightModalVisible(false);
+      await vanDonService.update(id, values);
+      message.success('Cập nhật thông tin thành công');
+      setIsEditModalVisible(false);
       loadDetail(); // Reload data
     } catch (error) { message.error(error?.error?.message || 'Lỗi cập nhật'); }
   };
@@ -62,7 +62,7 @@ const VanDonDetail = () => {
     try {
       message.loading({ content: 'Đang tạo file PDF...', key: 'pdf_vd' });
       await vanDonService.exportPdf(id);
-      message.success({ content: 'Đã tải Vận đơn PDF!', key: 'pdf_vd' });
+      message.success({ content: 'Đã xuất PDF và gửi Email!', key: 'pdf_vd' });
     } catch (error) {
       message.error({ content: 'Lỗi khi tải PDF', key: 'pdf_vd' });
     }
@@ -71,19 +71,14 @@ const VanDonDetail = () => {
   if (loading) return <div style={{ textAlign: 'center', padding: 50 }}><Spin size="large" /></div>;
   if (!data) return null;
 
-  // Quyền thao tác: Chỉ cho sửa/hủy khi chưa thanh toán và chưa bị hủy trước đó
   const canModify = data.trang_thai === 'CONFIRMED' && data.trang_thai_thanh_toan === 'UNPAID';
 
-  // FIX: Quét mọi trường hợp tên mảng lịch sử phiếu thu mà Backend có thể trả về
   const ptList = data.phieu_thus || data.phieuThuList || data.chiTietPhieuThu || data.lich_su_thu || [];
-  
-  // FIX: Tính toán chính xác số tiền đã thu dựa trên mảng vừa quét được (quét cả so_tien_phan_bo hoặc so_tien)
   const calculatedDaThu = data.da_thu ?? ptList.reduce((sum, pt) => sum + Number(pt.so_tien_phan_bo || pt.so_tien || 0), 0);
   const conLai = Number(data.gia_tri) - calculatedDaThu;
 
   return (
     <Card bordered={false}>
-      {/* HEADER */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <Space>
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/van-don')} />
@@ -93,16 +88,19 @@ const VanDonDetail = () => {
         
         {canModify && (
           <Space>
-            {/* NÚT MỚI THÊM */}
             <Button type="primary" icon={<PrinterOutlined />} onClick={handleDownloadPdf} style={{ backgroundColor: '#722ed1' }}>
-              In Vận Đơn (PDF)
+              Xuất & Gửi Khách hàng
             </Button>
             
             <Button icon={<EditOutlined />} onClick={() => {
-              weightForm.setFieldsValue({ trongLuongThucTe: data.trong_luong_thuc_te || data.trong_luong_du_kien });
-              setIsWeightModalVisible(true);
+              editForm.setFieldsValue({ 
+                trongLuongThucTe: data.trong_luong_thuc_te || data.trong_luong_du_kien,
+                nguoiLienHeLay: data.nguoi_lien_he_lay,
+                nguoiLienHeGiao: data.nguoi_lien_he_giao 
+              });
+              setIsEditModalVisible(true);
             }}>
-              Cập nhật TL thực tế
+              Cập nhật Thông tin
             </Button>
             <Button danger icon={<CloseOutlined />} onClick={() => setIsCancelModalVisible(true)}>
               Hủy đơn
@@ -112,7 +110,7 @@ const VanDonDetail = () => {
       </div>
 
       <Row gutter={48}>
-        {/* CỘT TRÁI: THÔNG TIN VẬN ĐƠN */}
+        {/* ... (Đoạn Row hiển thị thông tin Vận đơn giữ nguyên như cũ của bạn) ... */}
         <Col span={12}>
           <Divider orientation="left">Thông tin vận đơn</Divider>
           <div style={{ lineHeight: '2.5' }}>
@@ -170,12 +168,19 @@ const VanDonDetail = () => {
       />
 
       {/* --- MODALS --- */}
-      <Modal title="Cập nhật Trọng lượng thực tế" open={isWeightModalVisible} onCancel={() => setIsWeightModalVisible(false)} onOk={() => weightForm.submit()} destroyOnClose>
-        <Form form={weightForm} layout="vertical" onFinish={handleUpdateWeight}>
+      {/* 🚀 FIX: Thêm trường Liên hệ vào Modal Cập nhật */}
+      <Modal title="Cập nhật Thông tin Vận đơn" open={isEditModalVisible} onCancel={() => setIsEditModalVisible(false)} onOk={() => editForm.submit()} destroyOnClose>
+        <Form form={editForm} layout="vertical" onFinish={handleUpdate}>
           <Form.Item name="trongLuongThucTe" label="Số Kg thực tế sau khi cân" rules={[{ required: true, message: 'Bắt buộc nhập' }]}>
             <InputNumber style={{ width: '100%' }} min={0.1} />
           </Form.Item>
-          <Text type="secondary" italic>Hệ thống sẽ tự động đối chiếu Bảng giá cước và tính lại "Giá trị" của Vận đơn này.</Text>
+          <Form.Item name="nguoiLienHeLay" label="Người liên hệ lấy hàng (Kho đi)" rules={[{ required: true, message: 'Vui lòng nhập' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="nguoiLienHeGiao" label="Người liên hệ nhận hàng (Kho đến)" rules={[{ required: true, message: 'Vui lòng nhập' }]}>
+            <Input />
+          </Form.Item>
+          <Text type="secondary" italic>Hệ thống sẽ tự động tính lại "Giá trị" của Vận đơn này.</Text>
         </Form>
       </Modal>
 
@@ -186,7 +191,6 @@ const VanDonDetail = () => {
           </Form.Item>
         </Form>
       </Modal>
-
     </Card>
   );
 };

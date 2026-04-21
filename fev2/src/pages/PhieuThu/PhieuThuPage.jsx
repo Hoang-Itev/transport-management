@@ -76,7 +76,7 @@ const PhieuThuPage = () => {
           <Tooltip title="Xem chi tiết phân bổ">
             <Button type="text" icon={<EyeOutlined />} onClick={() => xemChiTiet(record.id)} />
           </Tooltip>
-          <Tooltip title="In Phiếu Thu">
+          <Tooltip title="Xuất & Gửi Khách hàng">
             <Button type="text" style={{color: '#722ed1'}} icon={<PrinterOutlined />} onClick={() => handleDownloadPdf(record.id)} />
           </Tooltip>
         </Space>

@@ -16,6 +16,8 @@ const receipts = require('./routes/receiptRoutes');
 const congNoRoutes = require('./routes/congNoRoutes');  // thêm dòng này cùng chỗ với các import khác
 const dashboardRoutes = require('./routes/dashboardRoutes');
 
+require('./cronjobs/debtReminder'); // Kích hoạt hệ thống chạy ngầm
+
 
 const app = express();
 

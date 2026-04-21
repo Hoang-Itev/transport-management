@@ -301,7 +301,6 @@ const exportPdf = async (req, res) => {
       });
     }
 
-    // Render HTML rows với đúng tên cột từ DB
     let rowsHtml = '';
     quotation.details.forEach((item, index) => {
       rowsHtml += `
@@ -337,22 +336,13 @@ const exportPdf = async (req, res) => {
           </div>
           <p><strong>Khách hàng:</strong> ${quotation.ten_cong_ty}</p>
           <p><strong>Đại diện:</strong> ${quotation.nguoi_lien_he} - ${quotation.so_dien_thoai}</p>
-          
           <table>
             <thead>
               <tr>
-                <th>STT</th>
-                <th>Từ</th>
-                <th>Đến</th>
-                <th>Loại hàng</th>
-                <th>Trọng lượng</th>
-                <th>Đơn giá</th>
-                <th>Thành tiền</th>
+                <th>STT</th><th>Từ</th><th>Đến</th><th>Loại hàng</th><th>Trọng lượng</th><th>Đơn giá</th><th>Thành tiền</th>
               </tr>
             </thead>
-            <tbody>
-              ${rowsHtml}
-            </tbody>
+            <tbody>${rowsHtml}</tbody>
           </table>
           <div class="total-box">Tổng thanh toán: ${Number(quotation.tong_gia_tri).toLocaleString('vi-VN')} VNĐ</div>
         </body>
@@ -364,6 +354,12 @@ const exportPdf = async (req, res) => {
     await page.setContent(htmlContent);
     const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true });
     await browser.close();
+
+    // 🚀 TỰ ĐỘNG GỬI MAIL KHI XUẤT PDF
+    if (quotation.email) {
+      sendQuotationEmail(quotation.email, quotation.ten_cong_ty, id, pdfBuffer)
+        .catch(err => console.error("Lỗi gửi mail báo giá:", err));
+    }
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="Quotation-${id}.pdf"`);

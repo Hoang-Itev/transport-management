@@ -1,6 +1,8 @@
 const Waybill = require('../models/waybillModel');
 const db = require('../config/database');
 const puppeteer = require('puppeteer'); // THÊM THƯ VIỆN TẠO PDF
+const { sendWaybillEmail } = require('../services/emailService');
+
 
 const getWaybills = async (req, res) => {
   try {
@@ -38,6 +40,7 @@ const getConfirmedWaybills = async (req, res) => {
 };
 
 // FIX: Hàm tạo Vận đơn đã nhận ngày hạn thanh toán từ form
+// [POST] Tạo Vận đơn (và tự động gửi Email)
 const createWaybill = async (req, res) => {
   try {
     const { baoGiaChiTietId, nguoiLienHeLay, nguoiLienHeGiao, ngayVanChuyen, ngayHetHanThanhToan } = req.body;
@@ -80,6 +83,7 @@ const createWaybill = async (req, res) => {
       });
     }
 
+    // KHAI BÁO 1 LẦN DUY NHẤT Ở ĐÂY
     const waybillId = await Waybill.create({
       baoGiaChiTietId,
       nguoiLienHeLay,
@@ -88,9 +92,30 @@ const createWaybill = async (req, res) => {
       trongLuongDuKien: chiTiet.trong_luong,
       giaTriDuKien,
       giaTri: giaTriDuKien,
-      ngayHetHanThanhToan, // Ghi nhận trực tiếp giá trị Frontend truyền lên
+      ngayHetHanThanhToan,
       nguoiTaoId: req.user.id
     });
+
+    // 🚀 TIẾN TRÌNH GỬI EMAIL NGẦM
+    try {
+      const [khRows2] = await db.query(`SELECT email, ten_cong_ty FROM khach_hangs WHERE id = ?`, [chiTiet.khach_hang_id]);
+      const khachHangMail = khRows2[0];
+
+      if (khachHangMail && khachHangMail.email) {
+        const mockReq = { params: { id: waybillId } };
+        const mockRes = {
+          setHeader: () => {},
+          send: (buffer) => {
+            // Nhớ đảm bảo bạn đã require sendWaybillEmail ở đầu file nhé
+            sendWaybillEmail(khachHangMail.email, khachHangMail.ten_cong_ty, waybillId, buffer)
+              .catch(e => console.log('Lỗi Background gửi mail VĐ:', e));
+          }
+        };
+        await module.exports.exportPdf(mockReq, mockRes);
+      }
+    } catch (err) {
+      console.log('Lỗi tiến trình gửi mail tự động VĐ:', err);
+    }
 
     res.status(201).json({ success: true, message: 'Tạo vận đơn thành công', data: { id: waybillId } });
   } catch (error) {
@@ -158,13 +183,14 @@ const getPendingWaybills = async (req, res) => {
 };
 
 // TÍNH NĂNG MỚI: TẠO PDF VẬN ĐƠN (BIÊN BẢN GIAO NHẬN)
+
+
 const exportPdf = async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Gom dữ liệu từ 5 bảng để in phiếu giao nhận
     const [fullInfo] = await db.query(`
-      SELECT vd.*, kh.ten_cong_ty, kh.nguoi_lien_he, kh.so_dien_thoai, kh.dia_chi,
+      SELECT vd.*, kh.ten_cong_ty, kh.nguoi_lien_he, kh.so_dien_thoai, kh.dia_chi, kh.email,
              td.tinh_di, td.tinh_den, lh.ten as ten_loai_hang, ct.don_gia_ap_dung
       FROM van_dons vd
       JOIN bao_gia_chi_tiets ct ON vd.bao_gia_chi_tiet_id = ct.id
@@ -204,7 +230,6 @@ const exportPdf = async (req, res) => {
             <div class="title">BIÊN BẢN GIAO NHẬN / VẬN ĐƠN</div>
             <div class="vd-id">Mã số: <strong>${data.id}</strong> | Ngày tạo: ${new Date(data.ngay_tao).toLocaleDateString('vi-VN')}</div>
           </div>
-
           <div class="section">
             <div class="section-title">1. Thông tin Khách hàng</div>
             <div class="row">
@@ -215,7 +240,6 @@ const exportPdf = async (req, res) => {
               <div class="col"><span class="label">Điện thoại:</span> ${data.so_dien_thoai}</div>
             </div>
           </div>
-
           <div class="section">
             <div class="section-title">2. Lịch trình & Hàng hóa</div>
             <div class="row">
@@ -228,43 +252,26 @@ const exportPdf = async (req, res) => {
             <div class="row">
               <div class="col"><span class="label">Nhận hàng (Giao):</span> ${data.nguoi_lien_he_giao}</div>
             </div>
-            <div class="row">
-              <div class="col"><span class="label">Đơn giá áp dụng:</span> ${Number(data.don_gia_ap_dung).toLocaleString('vi-VN')} VNĐ/kg</div>
-            </div>
           </div>
-
           <table>
             <thead>
               <tr>
-                <th>Trọng lượng dự kiến</th>
-                <th>Trọng lượng thực tế</th>
-                <th>Tổng cước phí</th>
-                <th>Hạn thanh toán</th>
+                <th>Trọng lượng dự kiến</th><th>Trọng lượng thực tế</th><th>Tổng cước phí</th><th>Hạn thanh toán</th>
               </tr>
             </thead>
             <tbody>
               <tr>
                 <td>${Number(data.trong_luong_du_kien).toLocaleString('vi-VN')} kg</td>
                 <td><strong style="color: #1890ff">${data.trong_luong_thuc_te ? Number(data.trong_luong_thuc_te).toLocaleString('vi-VN') + ' kg' : 'Chưa cập nhật'}</strong></td>
-                <td style="color: #cf1322; font-weight: bold; font-size: 16px;">${Number(data.gia_tri).toLocaleString('vi-VN')} VNĐ</td>
+                <td style="color: #cf1322; font-weight: bold;">${Number(data.gia_tri).toLocaleString('vi-VN')} VNĐ</td>
                 <td><strong>${new Date(data.ngay_het_han_thanh_toan).toLocaleDateString('vi-VN')}</strong></td>
               </tr>
             </tbody>
           </table>
-
           <div class="footer">
-            <div class="sign-box">
-              <div class="sign-title">Đại diện Giao hàng</div>
-              <div>(Ký và ghi rõ họ tên)</div>
-            </div>
-            <div class="sign-box">
-              <div class="sign-title">Tài xế tiếp nhận</div>
-              <div>(Ký và ghi rõ họ tên)</div>
-            </div>
-            <div class="sign-box">
-              <div class="sign-title">Đại diện Nhận hàng</div>
-              <div>(Ký và ghi rõ họ tên)</div>
-            </div>
+            <div class="sign-box"><div class="sign-title">Đại diện Giao hàng</div><div>(Ký tên)</div></div>
+            <div class="sign-box"><div class="sign-title">Tài xế tiếp nhận</div><div>(Ký tên)</div></div>
+            <div class="sign-box"><div class="sign-title">Đại diện Nhận hàng</div><div>(Ký tên)</div></div>
           </div>
         </body>
       </html>
@@ -276,6 +283,12 @@ const exportPdf = async (req, res) => {
     const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true });
     await browser.close();
 
+    // 🚀 TỰ ĐỘNG GỬI MAIL KHI XUẤT PDF
+    if (data.email) {
+      sendWaybillEmail(data.email, data.ten_cong_ty, id, pdfBuffer)
+        .catch(err => console.error("Lỗi gửi mail vận đơn:", err));
+    }
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="VanDon-${id}.pdf"`);
     res.send(pdfBuffer);
@@ -283,6 +296,8 @@ const exportPdf = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+ 
 
 module.exports = { 
   getWaybills, 

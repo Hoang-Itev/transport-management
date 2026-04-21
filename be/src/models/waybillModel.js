@@ -132,8 +132,23 @@ const Waybill = {
     try {
       await connection.beginTransaction();
       await connection.query(
-        `UPDATE van_dons SET trong_luong_thuc_te = ?, gia_tri_thuc_te = ?, gia_tri = ?, updated_at = NOW() WHERE id = ?`,
-        [trongLuongThucTe, giaTriThucTe, giaTriThucTe, id]
+        // `UPDATE van_dons SET trong_luong_thuc_te = ?, gia_tri_thuc_te = ?, gia_tri = ?, updated_at = NOW() WHERE id = ?`,
+        // [trongLuongThucTe, giaTriThucTe, giaTriThucTe, id]
+        `UPDATE van_dons 
+   SET trong_luong_thuc_te = ?, 
+       gia_tri_thuc_te = ?, 
+       gia_tri = ?,
+       nguoi_lien_he_lay = ?,  -- Thêm 2 dòng này
+       nguoi_lien_he_giao = ? 
+   WHERE id = ?`,
+  [
+    trongLuongThucTe, 
+    giaTriThucTe, 
+    giaTriMoi, 
+    req.body.nguoiLienHeLay, 
+    req.body.nguoiLienHeGiao, 
+    id
+  ]
       );
       await connection.commit();
     } catch (error) {

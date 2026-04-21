@@ -1,6 +1,7 @@
 const Receipt = require('../models/receiptModel');
 const db = require('../config/database');
 const puppeteer = require('puppeteer'); // THÊM THƯ VIỆN TẠO PDF
+const { sendReceiptEmail } = require('../services/emailService');
 
 const getReceipts = async (req, res) => {
   try {
@@ -21,6 +22,7 @@ const getReceiptById = async (req, res) => {
   }
 };
 
+// [POST] Tạo phiếu thu (và tự động gửi Email)
 const createReceipt = async (req, res) => {
   try {
     const { khachHangId, tongSoTien, ngayThu, hinhThuc, soThamChieu, ghiChu, phanBo } = req.body;
@@ -63,17 +65,37 @@ const createReceipt = async (req, res) => {
       return res.status(404).json({ success: false, error: { code: 'VANDON_NOT_FOUND', message: 'Một hoặc nhiều vận đơn không tồn tại' } });
     }
 
-    // Validation 5 + 6 + 7 + 8: trong transaction
+    // 🚀 KHAI BÁO 1 LẦN DUY NHẤT Ở ĐÂY
     const phieuThuId = await Receipt.create({
       khachHangId, tongSoTien, ngayThu, hinhThuc,
       soThamChieu, ghiChu, phanBo,
       nguoiGhiNhanId: req.user.id
     });
 
+    // 🚀 TIẾN TRÌNH GỬI EMAIL NGẦM
+    try {
+      const [khRows2] = await db.query(`SELECT email, ten_cong_ty FROM khach_hangs WHERE id = ?`, [khachHangId]);
+      const khachHangMail = khRows2[0];
+
+      if (khachHangMail && khachHangMail.email) {
+        const mockReq = { params: { id: phieuThuId } };
+        const mockRes = {
+          setHeader: () => {},
+          send: (buffer) => {
+            // Nhớ đảm bảo bạn đã require sendReceiptEmail ở đầu file nhé
+            sendReceiptEmail(khachHangMail.email, khachHangMail.ten_cong_ty, phieuThuId, buffer)
+              .catch(e => console.log('Lỗi Background gửi mail PT:', e));
+          }
+        };
+        await module.exports.exportPdf(mockReq, mockRes);
+      }
+    } catch (err) {
+      console.log('Lỗi tiến trình gửi mail tự động PT:', err);
+    }
+
     res.status(201).json({ success: true, message: 'Tạo phiếu thu thành công', data: { id: phieuThuId } });
 
   } catch (error) {
-    // Lỗi từ transaction (SO_TIEN_VUOT_QUA_CON_LAI)
     if (error.code === 'SO_TIEN_VUOT_QUA_CON_LAI') {
       return res.status(422).json({ success: false, error: { code: error.code, message: error.message } });
     }
@@ -86,9 +108,9 @@ const exportPdf = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 1. Lấy thông tin chung của Phiếu thu
+    // 1. Lấy thông tin chung của Phiếu thu (Bổ sung kh.email)
     const [ptRows] = await db.query(`
-      SELECT pt.*, kh.ten_cong_ty, kh.so_dien_thoai, kh.dia_chi, u.ho_ten as nguoi_lap
+      SELECT pt.*, kh.ten_cong_ty, kh.so_dien_thoai, kh.dia_chi, kh.email, u.ho_ten as nguoi_lap
       FROM phieu_thus pt
       JOIN khach_hangs kh ON pt.khach_hang_id = kh.id
       JOIN nguoi_dungs u ON pt.nguoi_ghi_nhan_id = u.id
@@ -190,9 +212,13 @@ const exportPdf = async (req, res) => {
     const page = await browser.newPage();
     await page.setContent(htmlContent);
     const pdfBuffer = await page.pdf({ format: 'A5', landscape: true, printBackground: true }); 
-    // Phiếu thu thường in khổ A5 ngang cho nhỏ gọn, nếu bạn thích A4 thì đổi 'A5' thành 'A4' và xóa chữ landscape đi nhé.
-    
     await browser.close();
+
+    // 🚀 TỰ ĐỘNG GỬI MAIL KHI XUẤT PDF PHIẾU THU
+    if (pt.email) {
+      sendReceiptEmail(pt.email, pt.ten_cong_ty, id, pdfBuffer)
+        .catch(e => console.error("Lỗi gửi mail Phiếu thu khi in:", e));
+    }
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="PhieuThu-PT${id}.pdf"`);

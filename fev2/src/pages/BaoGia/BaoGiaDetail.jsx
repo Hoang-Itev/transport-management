@@ -164,10 +164,12 @@ const BaoGiaDetail = () => {
         }
     };
 
+    
     const handleCreateVanDon = async (values) => {
         try {
             const payload = {
-                baoGiaChiTietId: selectedTrip ? selectedTrip.bao_gia_chi_tiet_id : selectedChiTietId,
+                // 🚀 SỬA LẠI DÒNG NÀY: Xóa bỏ selectedTrip, chỉ dùng selectedChiTietId
+                baoGiaChiTietId: selectedChiTietId, 
                 nguoiLienHeLay: values.nguoiLienHeLay,
                 nguoiLienHeGiao: values.nguoiLienHeGiao,
                 ngayVanChuyen: values.ngayVanChuyen.format('YYYY-MM-DD'),

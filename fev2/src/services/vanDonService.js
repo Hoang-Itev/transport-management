@@ -8,8 +8,13 @@ export const vanDonService = {
   // ---> THÊM DÒNG NÀY: Lấy danh sách chờ tạo VĐ
   getPendingList: () => axiosClient.get('/van-don/pending'),
   
-  updateTrongLuong: (id, trongLuongThucTe) => {
-    return axiosClient.put(`/van-don/${id}/trong-luong-thuc-te`, { trongLuongThucTe });
+  // updateTrongLuong: (id, trongLuongThucTe) => {
+  //   return axiosClient.put(`/van-don/${id}/trong-luong-thuc-te`, { trongLuongThucTe });
+  // },
+
+  // Đổi hàm cũ thành hàm này
+  update: (id, payload) => {
+    return axiosClient.put(`/van-don/${id}`, payload);
   },
   huyVanDon: (id, lyDoHuy) => {
     return axiosClient.post(`/van-don/${id}/huy`, { lyDoHuy });
