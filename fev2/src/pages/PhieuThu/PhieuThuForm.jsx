@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Form, Input, InputNumber, Button, Select, DatePicker, message, Divider, Typography, Row, Col, Checkbox } from 'antd';
-import { ArrowLeftOutlined, SaveOutlined, CheckCircleFilled } from '@ant-design/icons';
+// import { Card, Form, Input, InputNumber, Button, Select, DatePicker, message, Divider, Typography, Row, Col, Checkbox } from 'antd';
+// import { ArrowLeftOutlined, SaveOutlined, CheckCircleFilled } from '@ant-design/icons';
+
+// Thay thế 2 dòng import cũ bằng 2 dòng này:
+import { Card, Form, Input, InputNumber, Button, Select, DatePicker, message, Divider, Typography, Row, Col, Checkbox, Upload } from 'antd';
+import { ArrowLeftOutlined, SaveOutlined, CheckCircleFilled, ScanOutlined } from '@ant-design/icons';
+
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 
@@ -15,7 +20,39 @@ const { Option } = Select;
 const PhieuThuForm = () => {
   const [form] = Form.useForm();
   const navigate = useNavigate();
+  
+
   const [loading, setLoading] = useState(false);
+  
+  // 🚀 THÊM ĐOẠN CODE AI NÀY VÀO DƯỚI STATE LOADING
+  const [scanning, setScanning] = useState(false);
+
+  const handleScanBill = async ({ file, onSuccess, onError }) => {
+    setScanning(true);
+    try {
+      const formData = new FormData();
+      formData.append('billImage', file);
+      
+      const res = await phieuThuService.scanBill(formData);
+      
+      if (res.success && res.data.tongSoTien > 0) {
+        // Tự động điền số tiền AI đọc được vào Form
+        form.setFieldsValue({ tongSoTien: res.data.tongSoTien });
+        setTongTienPhieu(res.data.tongSoTien);
+        message.success('🤖 AI đã nhận diện thành công số tiền!');
+        onSuccess("ok");
+      } else {
+        message.warning(res.message || 'AI không tìm thấy số tiền hợp lệ, vui lòng nhập tay.');
+        onError("AI failed to read amount");
+      }
+    } catch (error) {
+      message.error('Lỗi khi quét bill. Backend chưa sẵn sàng hoặc file quá lớn.');
+      onError(error);
+    } finally {
+      setScanning(false);
+    }
+  };
+  // ---------------------------------------------
 
   const [khachHangList, setKhachHangList] = useState([]);
   const [vanDonList, setVanDonList] = useState([]); 
@@ -180,9 +217,32 @@ const PhieuThuForm = () => {
               <Input placeholder="VD: CK2026..." />
             </Form.Item>
           </Col>
+          {/* TÌM CỘT TỔNG SỐ TIỀN NÀY VÀ THAY BẰNG ĐOẠN MỚI NÀY */}
           <Col span={8}>
-            <Form.Item label="TỔNG SỐ TIỀN THU (VNĐ)" name="tongSoTien" rules={[{ required: true }]}>
-              <InputNumber style={{ width: '100%' }} min={1} size="large" onChange={(val) => setTongTienPhieu(val || 0)} />
+            <Form.Item label="TỔNG SỐ TIỀN THU (VNĐ)" required>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                
+                {/* 🚀 Bọc noStyle để chỉ điểm cho Ant Design biết chỗ nhận dữ liệu */}
+                <Form.Item name="tongSoTien" noStyle rules={[{ required: true, message: 'Nhập số tiền' }]}>
+                  <InputNumber 
+                    style={{ width: '100%' }} 
+                    min={1} 
+                    size="large" 
+                    onChange={(val) => setTongTienPhieu(val || 0)} 
+                  />
+                </Form.Item>
+                
+                <Upload 
+                  customRequest={handleScanBill} 
+                  showUploadList={false} 
+                  accept="image/*"
+                >
+                  <Button size="large" type="dashed" icon={<ScanOutlined />} loading={scanning} style={{ borderColor: '#52c41a', color: '#52c41a' }}>
+                    Quét AI
+                  </Button>
+                </Upload>
+
+              </div>
             </Form.Item>
           </Col>
           <Col span={8}>

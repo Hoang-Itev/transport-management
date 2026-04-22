@@ -2,8 +2,10 @@ const Receipt = require('../models/receiptModel');
 const db = require('../config/database');
 const puppeteer = require('puppeteer'); // THÊM THƯ VIỆN TẠO PDF
 const { sendReceiptEmail } = require('../services/emailService');
-
 const { sendTelegramMessage } = require('../services/telegramService'); // THÊM DÒNG NÀY
+
+const sharp = require('sharp');//chinh mau anh
+const Tesseract = require('tesseract.js');//ai scan anh
 
 const getReceipts = async (req, res) => {
   try {
@@ -243,4 +245,84 @@ const exportPdf = async (req, res) => {
   }
 };
 
-module.exports = { getReceipts, getReceiptById, createReceipt, exportPdf };
+// [POST] Quét ảnh Bill bằng AI (Có tích hợp Tiền xử lý ảnh - Preprocessing)
+const scanBill = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Vui lòng tải lên ảnh bill chuyển khoản' });
+    }
+
+    console.log('🖼️ Đang tiền xử lý hình ảnh (Khử nhiễu, chỉnh màu)...');
+
+    // 🚀 BƯỚC 1.5: TIỀN XỬ LÝ ẢNH BẰNG SHARP (IMAGE PRE-PROCESSING)
+    // Phép thuật nằm ở đây: Xử lý cái bill MB Bank "khó nhằn"
+    const processedImageBuffer = await sharp(req.file.buffer)
+      .grayscale()   // 1. Biến ảnh màu thành Trắng/Đen (Khử nền gradient)
+      .normalize()   // 2. Kéo dãn độ tương phản lên mức tối đa
+      .negate()      // 3. ĐẢO MÀU: Biến chữ trắng/nền đen thành CHỮ ĐEN/NỀN TRẮNG (Tesseract cực kỳ thích điều này)
+      .toBuffer();
+
+    console.log('🤖 AI đang đọc văn bản từ ảnh đã xử lý... Vui lòng đợi...');
+
+    // 2. Đưa cái ảnh CHỮ ĐEN NỀN TRẮNG vừa tạo vào cho Tesseract đọc
+    const { data: { text } } = await Tesseract.recognize(
+      processedImageBuffer,
+      'vie+eng' 
+    );
+
+    console.log('📝 Chữ AI đọc được (Sau khi xử lý ảnh):\n', text);
+
+    // 3. XỬ LÝ NHIỄU OCR BẰNG CODE
+    let fixedText = text.replace(/[Oo]/g, '0').replace(/\n/g, ' ');
+
+    // 4. LOGIC REGEX TÌM TIỀN
+    const vndRegex = /([0-9.,\s]+)\s*(?:VND|VNĐ|Đ|VNO|VN0|YND|Vnd)/i;
+    const matchVND = fixedText.match(vndRegex);
+
+    let finalAmount = 0;
+
+    if (matchVND && matchVND[1]) {
+      const cleanStr = matchVND[1].replace(/[^0-9]/g, '');
+      finalAmount = Number(cleanStr);
+      console.log(`🎯 Đã chốt số bằng chữ VND: ${finalAmount}`);
+    } else {
+      const fallbackRegex = /\b\d{1,3}(?:[.,\s]\d{3})+\b/g;
+      const foundNumbers = fixedText.match(fallbackRegex);
+      
+      if (foundNumbers && foundNumbers.length > 0) {
+        const cleanNumbers = foundNumbers.map(str => Number(str.replace(/[^0-9]/g, '')));
+        const validAmounts = cleanNumbers.filter(num => num >= 1000 && num <= 1000000000);
+        
+        if (validAmounts.length > 0) {
+          finalAmount = Math.max(...validAmounts); 
+          console.log(`🎯 Đã chốt số lớn nhất trên bill: ${finalAmount}`);
+        }
+      }
+    }
+
+    // 5. Kiểm tra kết quả
+    if (finalAmount <= 0 || isNaN(finalAmount)) {
+      return res.status(200).json({ 
+        success: true, 
+        message: 'AI đọc được chữ nhưng không tìm thấy số tiền nào hợp lệ',
+        data: { tongSoTien: 0, rawText: text } 
+      });
+    }
+
+    // 6. Trả về thành công
+    res.json({
+      success: true,
+      message: '🤖 AI quét bill thành công!',
+      data: {
+        tongSoTien: finalAmount, 
+        rawText: text 
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Lỗi AI OCR:', error);
+    res.status(500).json({ success: false, message: 'Lỗi trong quá trình quét ảnh AI' });
+  }
+};
+
+module.exports = { getReceipts, getReceiptById, createReceipt, exportPdf, scanBill };

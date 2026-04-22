@@ -5,6 +5,9 @@ export const phieuThuService = {
   getById: (id) => axiosClient.get(`/phieu-thu/${id}`),
   create: (data) => axiosClient.post('/phieu-thu', data),
 
+  // 🚀 THÊM DÒNG NÀY ĐỂ GỌI API AI QUÉT BILL
+  scanBill: (formData) => axiosClient.post('/phieu-thu/scan-bill', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+
   exportPdf: async (id) => {
     try {
       // 🚀 FIX 1: Đổi chữ 'van-don' thành 'phieu-thu'
