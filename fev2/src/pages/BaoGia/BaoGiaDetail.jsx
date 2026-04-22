@@ -5,11 +5,13 @@ import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 
 import { baoGiaService } from '../../services/baoGiaService';
-import { khachHangService } from '../../services/khachHangService'; 
-import { danhMucService } from '../../services/danhMucService';     
-import { vanDonService } from '../../services/vanDonService'; 
+import { khachHangService } from '../../services/khachHangService';
+import { danhMucService } from '../../services/danhMucService';
+import { vanDonService } from '../../services/vanDonService';
 import StatusTag from '../../components/common/StatusTag';
 import CurrencyText from '../../components/common/CurrencyText';
+
+
 
 const { Title, Text } = Typography;
 
@@ -27,6 +29,8 @@ const BaoGiaDetail = () => {
     const [tuyenDuongList, setTuyenDuongList] = useState([]);
     const [loaiHangList, setLoaiHangList] = useState([]);
 
+    const [bangGiaList, setBangGiaList] = useState([]);
+
     const [currentKhachHangId, setCurrentKhachHangId] = useState(null);
 
     const [isCreateVdVisible, setIsCreateVdVisible] = useState(false);
@@ -37,18 +41,30 @@ const BaoGiaDetail = () => {
     const dsChiTiet = baoGiaData?.chiTiet || baoGiaData?.chi_tiet || [];
 
     useEffect(() => {
+        // 🚀 SỬA LẠI HÀM loadDropdownData
         const loadDropdownData = async () => {
             try {
+                // Tách riêng Bảng giá ra để nếu nó lỗi thì Tuyến và Loại hàng vẫn load được
                 const [khRes, tdRes, lhRes] = await Promise.all([
                     khachHangService.getList({ limit: 1000, isActive: true }),
                     danhMucService.getTuyenDuongList(),
-                    danhMucService.getLoaiHangList() 
+                    danhMucService.getLoaiHangList()
                 ]);
+
                 if (khRes.success) setKhachHangList(khRes.data);
                 if (tdRes.success) setTuyenDuongList(tdRes.data);
                 if (lhRes.success) setLoaiHangList(lhRes.data);
+
+                // Load bảng giá riêng, lỗi thì thôi không báo message.error to đùng
+                try {
+                    const bgRes = await danhMucService.getBangGiaList({ limit: 5000 });
+                    if (bgRes?.success) setBangGiaList(bgRes.data);
+                } catch (e) {
+                    console.warn("⚠️ Chưa load được bảng giá cước, tính năng lọc tự động sẽ bị tạm tắt.");
+                }
+
             } catch (error) {
-                message.error('Không tải được danh mục');
+                message.error('Không tải được danh mục Khách hàng/Tuyến/Loại hàng');
             }
         };
 
@@ -62,7 +78,7 @@ const BaoGiaDetail = () => {
             if (res.success) {
                 setBaoGiaData(res.data);
                 const chiTietArr = res.data.chiTiet || res.data.chi_tiet || [];
-                
+
                 setCurrentKhachHangId(res.data.khach_hang_id);
 
                 form.setFieldsValue({
@@ -72,7 +88,7 @@ const BaoGiaDetail = () => {
                     chiTiet: chiTietArr.map(ct => ({
                         ...ct,
                         tuyenDuongId: Number(ct.tuyen_duong_id),
-                        loaiHangId: Number(ct.loai_hang_id), 
+                        loaiHangId: Number(ct.loai_hang_id),
                         diaChiLayHang: ct.dia_chi_lay_hang,
                         diaChiGiaoHang: ct.dia_chi_giao_hang,
                         trongLuong: Number(ct.trong_luong)
@@ -91,7 +107,7 @@ const BaoGiaDetail = () => {
     const selectedKhachHang = khachHangList.find(kh => kh.id === currentKhachHangId);
     const currentDebt = Number(selectedKhachHang?.cong_no_hien_tai) || 0;
     const debtLimit = Number(selectedKhachHang?.han_muc_cong_no) || 0;
-    
+
     // BỔ SUNG: Kiểm tra số đơn quá hạn thanh toán
     const soDonQuaHan = Number(selectedKhachHang?.so_don_qua_han) || 0;
     const isQuaHan = soDonQuaHan > 0;
@@ -99,6 +115,27 @@ const BaoGiaDetail = () => {
 
     // Cờ khóa toàn bộ các nút thao tác lưu/gửi nếu bị chặn nghiệp vụ
     const isBlocked = isVuotHanMuc || isQuaHan;
+
+    // 🚀 HÀM KIỂM TRA TRỌNG LƯỢNG KHI RỜI CHUỘT (ONBLUR)
+    const handleTrongLuongBlur = (name) => {
+        const rowData = form.getFieldValue(['chiTiet', name]);
+        if (!rowData) return;
+        const { tuyenDuongId, loaiHangId, trongLuong } = rowData;
+
+        if (tuyenDuongId && loaiHangId && trongLuong) {
+            // Lục tìm trong Bảng Giá xem có mốc Kg này không
+            const isValidPrice = bangGiaList.some(bg =>
+                Number(bg.tuyen_duong_id) === Number(tuyenDuongId) &&
+                Number(bg.loai_hang_id) === Number(loaiHangId) &&
+                Number(trongLuong) >= Number(bg.kg_tu) &&
+                Number(trongLuong) <= Number(bg.kg_den)
+            );
+
+            if (!isValidPrice) {
+                message.warning(`⚠️ Bảng giá chưa có mốc ${trongLuong}kg cho Tuyến và Loại hàng này. Vui lòng kiểm tra lại!`);
+            }
+        }
+    };
 
     const onFinish = async (values) => {
         if (!isDraft) return;
@@ -121,10 +158,10 @@ const BaoGiaDetail = () => {
                 message.success('Tạo báo giá thành công!');
                 navigate(`/bao-gia/${res.data.id}`);
             } else {
-                await baoGiaService.update(id, { 
-                    ngayHetHan: payload.ngayHetHan, 
+                await baoGiaService.update(id, {
+                    ngayHetHan: payload.ngayHetHan,
                     ghiChu: payload.ghiChu,
-                    chiTiet: payload.chiTiet 
+                    chiTiet: payload.chiTiet
                 });
                 message.success('Đã lưu thay đổi báo giá');
                 loadDetail();
@@ -142,7 +179,7 @@ const BaoGiaDetail = () => {
             if (actionType === 'GUI') {
                 await baoGiaService.guiBaoGia(id);
                 message.success('Đã chuyển trạng thái báo giá thành ĐÃ GỬI');
-                
+
                 message.loading({ content: 'Đang khởi tạo file PDF...', key: 'pdf_download' });
                 try {
                     await baoGiaService.exportPdf(id);
@@ -150,7 +187,7 @@ const BaoGiaDetail = () => {
                 } catch (pdfErr) {
                     message.error({ content: 'Lỗi tải PDF', key: 'pdf_download' });
                 }
-                
+
             } else if (actionType === 'XAC_NHAN') {
                 await baoGiaService.xacNhan(id, { trangThai: 'ACCEPTED', lyDo: '' });
                 message.success('Khách đã đồng ý báo giá');
@@ -158,22 +195,22 @@ const BaoGiaDetail = () => {
                 await baoGiaService.xacNhan(id, { trangThai: 'REJECTED', lyDo: 'Khách không đồng ý' });
                 message.success('Đã đánh dấu khách từ chối');
             }
-            loadDetail(); 
+            loadDetail();
         } catch (error) {
             message.error('Lỗi thao tác');
         }
     };
 
-    
+
     const handleCreateVanDon = async (values) => {
         try {
             const payload = {
                 // 🚀 SỬA LẠI DÒNG NÀY: Xóa bỏ selectedTrip, chỉ dùng selectedChiTietId
-                baoGiaChiTietId: selectedChiTietId, 
+                baoGiaChiTietId: selectedChiTietId,
                 nguoiLienHeLay: values.nguoiLienHeLay,
                 nguoiLienHeGiao: values.nguoiLienHeGiao,
                 ngayVanChuyen: values.ngayVanChuyen.format('YYYY-MM-DD'),
-                ngayHetHanThanhToan: values.ngayHetHanThanhToan.format('YYYY-MM-DD') 
+                ngayHetHanThanhToan: values.ngayHetHanThanhToan.format('YYYY-MM-DD')
             };
             const res = await vanDonService.create(payload);
             message.success('Tạo Vận đơn thành công!');
@@ -236,12 +273,12 @@ const BaoGiaDetail = () => {
 
                         {/* HIỂN THỊ CẢNH BÁO KÉP (CÔNG NỢ VÀ QUÁ HẠN) */}
                         {selectedKhachHang && (
-                            <div style={{ 
-                                marginBottom: 24, 
-                                padding: '10px 12px', 
-                                borderRadius: 6, 
-                                backgroundColor: isBlocked ? '#fff2f0' : '#f6ffed', 
-                                border: `1px solid ${isBlocked ? '#ffccc7' : '#b7eb8f'}` 
+                            <div style={{
+                                marginBottom: 24,
+                                padding: '10px 12px',
+                                borderRadius: 6,
+                                backgroundColor: isBlocked ? '#fff2f0' : '#f6ffed',
+                                border: `1px solid ${isBlocked ? '#ffccc7' : '#b7eb8f'}`
                             }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                                     <Text type="secondary">Nợ hiện tại:</Text>
@@ -251,11 +288,11 @@ const BaoGiaDetail = () => {
                                     <Text type="secondary">Hạn mức:</Text>
                                     <Text strong><CurrencyText value={debtLimit} /></Text>
                                 </div>
-                                
+
                                 {/* Thông báo đỏ nếu bị dính 1 trong 2 lỗi */}
                                 {isQuaHan && (
                                     <div style={{ color: '#cf1322', marginTop: 8, fontSize: 13, fontWeight: 500 }}>
-                                        ⚠️ Khách đang có <strong style={{fontSize: 15}}>{soDonQuaHan}</strong> đơn quá hạn thanh toán!
+                                        ⚠️ Khách đang có <strong style={{ fontSize: 15 }}>{soDonQuaHan}</strong> đơn quá hạn thanh toán!
                                     </div>
                                 )}
                                 {isVuotHanMuc && !isQuaHan && (
@@ -307,6 +344,7 @@ const BaoGiaDetail = () => {
                                         </Space>
                                     }
                                 >
+                                    {/* 🚀 THAY THẾ ROW 3 CỘT (TUYẾN, LOẠI, KG) BẰNG ĐOẠN NÀY */}
                                     <Row gutter={16}>
                                         <Col span={8}>
                                             <Form.Item {...restField} label="Tuyến đường" name={[name, 'tuyenDuongId']} rules={[{ required: true }]}>
@@ -316,39 +354,72 @@ const BaoGiaDetail = () => {
                                                     optionFilterProp="label"
                                                     filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
                                                     options={tuyenDuongList
-                                                        .filter(td => td.is_active === 1 || td.is_active === true || td.isActive === 1 || td.isActive === true)
+                                                        .filter(td => td.is_active === 1 || td.isActive === true)
                                                         .map(td => {
-                                                            const labelDisplay = (td.tinh_di && td.tinh_den) 
-                                                                                ? `${td.tinh_di} - ${td.tinh_den}` 
-                                                                                : (td.ten_tuyen_duong || td.tenTuyenDuong || td.ten_tuyen || td.tenTuyen || `Tuyến số ${td.id}`);
+                                                            const labelDisplay = (td.tinh_di && td.tinh_den) ? `${td.tinh_di} - ${td.tinh_den}` : (td.ten_tuyen_duong || `Tuyến số ${td.id}`);
                                                             return { value: Number(td.id), label: labelDisplay };
                                                         })
                                                     }
                                                     disabled={!isDraft}
+                                                    onChange={() => {
+                                                        // Tự động xóa Trắng Loại Hàng và Kg nếu nhân viên đổi Tuyến khác
+                                                        const currentChiTiet = form.getFieldValue('chiTiet');
+                                                        currentChiTiet[name].loaiHangId = undefined;
+                                                        currentChiTiet[name].trongLuong = undefined;
+                                                        form.setFieldsValue({ chiTiet: currentChiTiet });
+                                                    }}
                                                 />
                                             </Form.Item>
                                         </Col>
-                                        <Col span={8}>
-                                            <Form.Item {...restField} label="Loại hàng" name={[name, 'loaiHangId']} rules={[{ required: true }]}>
-                                                <Select
-                                                    showSearch
-                                                    placeholder="Gõ để tìm loại..."
-                                                    optionFilterProp="label"
-                                                    filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-                                                    options={loaiHangList
-                                                        .filter(lh => lh.is_active === 1 || lh.is_active === true || lh.isActive === 1 || lh.isActive === true)
-                                                        .map(lh => {
-                                                            const labelDisplay = lh.ten || lh.ten_loai_hang || lh.tenLoaiHang || lh.ten_loai || lh.tenLoai || `Mã loại ${lh.id}`;
-                                                            return { value: Number(lh.id), label: labelDisplay };
-                                                        })
-                                                    }
-                                                    disabled={!isDraft}
-                                                />
-                                            </Form.Item>
-                                        </Col>
+
+                                        {/* BỌC LOẠI HÀNG TRONG SHOULD-UPDATE ĐỂ LẮNG NGHE TUYẾN ĐƯỜNG */}
+                                        <Form.Item noStyle shouldUpdate={(prev, curr) => prev.chiTiet?.[name]?.tuyenDuongId !== curr.chiTiet?.[name]?.tuyenDuongId}>
+                                            {() => {
+                                                const currentTdId = form.getFieldValue(['chiTiet', name, 'tuyenDuongId']);
+
+                                                // Lọc loại hàng: Chỉ giữ những loại hàng xuất hiện trong Bảng Giá của Tuyến này
+                                                let filteredLoaiHang = loaiHangList.filter(lh => lh.is_active === 1 || lh.isActive === true);
+                                                if (currentTdId && bangGiaList.length > 0) {
+                                                    const validLoaiHangIds = new Set(
+                                                        bangGiaList.filter(bg => Number(bg.tuyen_duong_id) === Number(currentTdId)).map(bg => Number(bg.loai_hang_id))
+                                                    );
+                                                    filteredLoaiHang = filteredLoaiHang.filter(lh => validLoaiHangIds.has(Number(lh.id)));
+                                                }
+
+                                                return (
+                                                    <Col span={8}>
+                                                        <Form.Item {...restField} label="Loại hàng" name={[name, 'loaiHangId']} rules={[{ required: true }]}>
+                                                            <Select
+                                                                showSearch
+                                                                placeholder={currentTdId ? "Gõ để tìm loại..." : "Vui lòng chọn Tuyến đường trước"}
+                                                                optionFilterProp="label"
+                                                                filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+                                                                disabled={!isDraft || !currentTdId} // Khóa luôn nếu chưa chọn Tuyến
+                                                                options={filteredLoaiHang.map(lh => {
+                                                                    const labelDisplay = lh.ten || lh.ten_loai_hang || `Mã loại ${lh.id}`;
+                                                                    return { value: Number(lh.id), label: labelDisplay };
+                                                                })}
+                                                                onChange={() => {
+                                                                    // Xóa Kg nếu đổi Loại hàng
+                                                                    const currentChiTiet = form.getFieldValue('chiTiet');
+                                                                    currentChiTiet[name].trongLuong = undefined;
+                                                                    form.setFieldsValue({ chiTiet: currentChiTiet });
+                                                                }}
+                                                            />
+                                                        </Form.Item>
+                                                    </Col>
+                                                );
+                                            }}
+                                        </Form.Item>
+
                                         <Col span={8}>
                                             <Form.Item {...restField} label="Trọng lượng (kg)" name={[name, 'trongLuong']} rules={[{ required: true }]}>
-                                                <InputNumber style={{ width: '100%' }} min={1} disabled={!isDraft} />
+                                                <InputNumber
+                                                    style={{ width: '100%' }}
+                                                    min={1}
+                                                    disabled={!isDraft}
+                                                    onBlur={() => handleTrongLuongBlur(name)} // Gắn sự kiện Rời chuột tại đây
+                                                />
                                             </Form.Item>
                                         </Col>
                                     </Row>
@@ -398,7 +469,7 @@ const BaoGiaDetail = () => {
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: 24 }}>
                     <Button onClick={() => navigate('/bao-gia')}>Quay lại</Button>
-                    
+
                     {isDraft && (
                         // NÚT LƯU SẼ BỊ VÔ HIỆU HÓA NẾU BỊ BLOCK
                         <Button type="primary" htmlType="submit" size="large" icon={<SaveOutlined />} loading={loading} disabled={isBlocked}>
@@ -407,8 +478,8 @@ const BaoGiaDetail = () => {
                     )}
 
                     {isEdit && baoGiaData?.trang_thai === 'DRAFT' && (
-                        <Popconfirm 
-                            title="Chốt và gửi báo giá cho khách?" 
+                        <Popconfirm
+                            title="Chốt và gửi báo giá cho khách?"
                             description="Hệ thống sẽ chốt giá hiện tại và tải file PDF về máy."
                             onConfirm={() => handleAction('GUI')}
                             okText="Gửi & Tải PDF"
@@ -435,15 +506,15 @@ const BaoGiaDetail = () => {
                     <Form.Item name="ngayVanChuyen" label="Ngày vận chuyển (Dự kiến đi)" rules={[{ required: true, message: 'Vui lòng chọn ngày đi' }]}>
                         <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
                     </Form.Item>
-                    
+
                     <Form.Item name="nguoiLienHeLay" label="Thông tin người lấy hàng" rules={[{ required: true, message: 'Vui lòng nhập thông tin người lấy' }]}>
                         <Input placeholder="Tên và SĐT người ở kho bốc..." />
                     </Form.Item>
-                    
+
                     <Form.Item name="nguoiLienHeGiao" label="Thông tin người nhận hàng" rules={[{ required: true, message: 'Vui lòng nhập thông tin người nhận' }]}>
                         <Input placeholder="Tên và SĐT người nhận hàng..." />
                     </Form.Item>
-                    
+
                     <Form.Item name="ngayHetHanThanhToan" label="Hạn chót thanh toán" rules={[{ required: true, message: 'Vui lòng chọn hạn chót' }]}>
                         <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
                     </Form.Item>
