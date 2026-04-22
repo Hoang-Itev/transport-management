@@ -3,6 +3,7 @@ const Pricing = require('../models/pricingModel'); // Import model Bảng Giá �
 const puppeteer = require('puppeteer');
 const db = require('../config/database'); // THÊM DÒNG NÀY ĐỂ QUERY CÔNG NỢ
 
+const { sendTelegramMessage } = require('../services/telegramService'); // THÊM DÒNG NÀY
 
 //mail
 const { sendQuotationEmail } = require('../services/emailService');
@@ -268,6 +269,7 @@ const sendQuotation = async (req, res) => {
 };
 
 // [POST] Khách hàng xác nhận
+// [POST] Khách hàng xác nhận
 const confirmQuotation = async (req, res) => {
   try {
     const { id } = req.params;
@@ -283,6 +285,19 @@ const confirmQuotation = async (req, res) => {
     }
 
     await Quotation.updateStatus(id, trangThai, lyDo);
+
+    // 🚀 THÊM TÍCH HỢP TELEGRAM BOT Ở ĐÂY
+    if (trangThai === 'ACCEPTED') {
+        const msg = `
+✅ <b>CHỐT ĐƠN THÀNH CÔNG!</b>
+-----------------------------------
+Mã Báo giá: <b>BG-${id}</b>
+Nhân viên Sale vừa chốt đơn
+Vui lòng vào hệ thống để kiểm tra & Tạo Vận đơn!
+        `;
+        sendTelegramMessage(msg); // Chạy ngầm, không await
+    }
+
     res.json({ success: true, message: `Báo giá đã được chuyển sang ${trangThai}` });
   } catch (error) {
     res.status(500).json({ success: false, error: { message: error.message } });

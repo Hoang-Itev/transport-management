@@ -3,6 +3,8 @@ const db = require('../config/database');
 const puppeteer = require('puppeteer'); // THÊM THƯ VIỆN TẠO PDF
 const { sendReceiptEmail } = require('../services/emailService');
 
+const { sendTelegramMessage } = require('../services/telegramService'); // THÊM DÒNG NÀY
+
 const getReceipts = async (req, res) => {
   try {
     const result = await Receipt.findAll(req.query);
@@ -71,6 +73,19 @@ const createReceipt = async (req, res) => {
       soThamChieu, ghiChu, phanBo,
       nguoiGhiNhanId: req.user.id
     });
+
+    // 🚀 THÊM TÍCH HỢP TELEGRAM BOT Ở ĐÂY
+    const soTienFormat = Number(tongSoTien).toLocaleString('vi-VN');
+    const msg = `
+💰 <b>TIỀN VỀ TÀI KHOẢN!</b>
+-----------------------------------
+Số phiếu: <b>PT-${phieuThuId}</b>
+Khách hàng ID: <b>${khachHangId}</b>
+Số tiền thu: <b>${soTienFormat} VNĐ</b>
+Hình thức: ${hinhThuc === 'CHUYEN_KHOAN' ? '🏦 Chuyển khoản' : '💵 Tiền mặt'}
+Kế toán vừa ghi nhận hệ thống!
+    `;
+    sendTelegramMessage(msg); // Chạy ngầm
 
     // 🚀 TIẾN TRÌNH GỬI EMAIL NGẦM
     try {
