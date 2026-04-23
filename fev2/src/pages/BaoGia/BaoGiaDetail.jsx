@@ -11,6 +11,9 @@ import { vanDonService } from '../../services/vanDonService';
 import StatusTag from '../../components/common/StatusTag';
 import CurrencyText from '../../components/common/CurrencyText';
 
+// Thêm dòng này ở ngoài cùng, dưới các dòng import
+let zaloWindow = null;
+
 
 
 const { Title, Text } = Typography;
@@ -219,6 +222,48 @@ const BaoGiaDetail = () => {
             navigate(`/van-don/${res.data.id}`);
         } catch (error) {
             message.error(error?.error?.message || 'Lỗi khi tạo vận đơn');
+        }
+    };
+
+   
+    
+ // 🚀 HÀM XỬ LÝ CHIA SẺ ZALO (V5 - Có nhắc khách điền thông tin lấy/nhận hàng)
+   const handleShareZalo = async () => {
+        if (!baoGiaData) return;
+
+        // 1. Trích xuất thông tin Tuyến đường & Loại hàng
+        const danhSachChiTiet = baoGiaData?.details || baoGiaData?.chiTiet || [];
+        
+        let thongTinTomTat = "";
+        if (danhSachChiTiet.length > 0) {
+            const item = danhSachChiTiet[0];
+            thongTinTomTat = `\n🛣 Tuyến đường: ${item.dia_chi_lay_hang || 'Kho xuất'} -> ${item.dia_chi_giao_hang || 'Kho nhận'}`;
+            thongTinTomTat += `\n📦 Loại hàng: ${item.ten_loai_hang || 'Chưa phân loại'}`;
+            
+            if (danhSachChiTiet.length > 1) {
+                thongTinTomTat += `\n*(Và ${danhSachChiTiet.length - 1} tuyến/loại hàng khác)*`;
+            }
+        }
+
+        // 2. Soạn nội dung 
+        const noiDungZalo = `Kính gửi ${baoGiaData?.ten_cong_ty || 'Quý khách hàng'},\n\nEm gửi Báo giá cước vận tải (Mã BG: ${id}).${thongTinTomTat}\n💰 Tổng thanh toán: ${Number(baoGiaData?.tong_gia_tri || 0).toLocaleString('vi-VN')} VNĐ.\n\nAnh/chị xem chi tiết cước phí ở file PDF em đính kèm bên dưới nhé!\n\n👉 NẾU ĐỒNG Ý CHỐT GIÁ: Anh/chị phản hồi lại giúp em xin Tên & SĐT người liên hệ bốc hàng/nhận hàng để em lên mã vận đơn và điều xe luôn ạ.\n\nTrân trọng!`;
+
+        try {
+            // 3. Tự động Copy vào chuột
+            await navigator.clipboard.writeText(noiDungZalo);
+            message.success('Đã copy lời chào! Nhớ KÉO THẢ THÊM FILE PDF vào Zalo nhé.');
+
+            // 4. MỞ ZALO THÔNG MINH (Không load lại trang)
+            if (zaloWindow && !zaloWindow.closed) {
+                // Nếu tab Zalo đã mở -> Chỉ gọi nó ngoi lên (Focus)
+                zaloWindow.focus();
+            } else {
+                // Nếu chưa mở hoặc đã bị khách tắt mất -> Mở tab mới và lưu vào bộ nhớ
+                zaloWindow = window.open('https://chat.zalo.me', '_blank');
+            }
+            
+        } catch (err) {
+            message.error('Không thể copy nội dung, vui lòng thử lại.');
         }
     };
 
@@ -469,24 +514,37 @@ const BaoGiaDetail = () => {
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: 24 }}>
                     <Button onClick={() => navigate('/bao-gia')}>Quay lại</Button>
-
+                    
                     {isDraft && (
-                        // NÚT LƯU SẼ BỊ VÔ HIỆU HÓA NẾU BỊ BLOCK
                         <Button type="primary" htmlType="submit" size="large" icon={<SaveOutlined />} loading={loading} disabled={isBlocked}>
                             Lưu báo giá (Cập nhật giá)
                         </Button>
                     )}
 
+                    {/* 🚀 NÚT ZALO XUẤT HIỆN KHI BÁO GIÁ ĐÃ LƯU HOẶC ĐÃ GỬI */}
+                   {/* NÚT CHIA SẺ ZALO CHUẨN */}
+                    {isEdit && (
+                        <Button 
+                            size="large" 
+                            style={{ backgroundColor: '#0068ff', color: 'white', borderColor: '#0068ff' }} 
+                            icon={<SendOutlined />} 
+                            // CHÚ Ý CHỖ NÀY: Bắt buộc phải có () => ở đằng trước
+                            onClick={() => handleShareZalo()} 
+                        >
+                            Chia sẻ Zalo
+                        </Button>
+                    )}
+
                     {isEdit && baoGiaData?.trang_thai === 'DRAFT' && (
-                        <Popconfirm
-                            title="Chốt và gửi báo giá cho khách?"
+                        <Popconfirm 
+                            title="Chốt và gửi báo giá cho khách?" 
                             description="Hệ thống sẽ chốt giá hiện tại và tải file PDF về máy."
                             onConfirm={() => handleAction('GUI')}
                             okText="Gửi & Tải PDF"
                             cancelText="Hủy"
                             disabled={isBlocked}
                         >
-                            <Button type="primary" style={{ backgroundColor: isBlocked ? '#bfbfbf' : '#52c41a' }} size="large" icon={<SendOutlined />} disabled={isBlocked}>
+                            <Button type="primary" style={{ backgroundColor: isBlocked ? '#bfbfbf' : '#52c41a' }} size="large" icon={<CheckOutlined />} disabled={isBlocked}>
                                 Gửi KH (Tải PDF)
                             </Button>
                         </Popconfirm>

@@ -4,8 +4,8 @@ const nodemailer = require('nodemailer');
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: 'itev.online@gmail.com', // Email của bạn
-    pass: 'geir ablv hqyz gegd' // ⚠️ NHỚ SỬA LẠI THÀNH MÃ 16 CHỮ CÁI CỦA BẠN VÀO ĐÂY NHÉ
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
   }
 });
 
