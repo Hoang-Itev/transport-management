@@ -124,12 +124,24 @@ const KhachHangForm = () => {
 
         <Row gutter={24}>
           <Col span={12}>
-            <Form.Item label="Hạn mức công nợ (VNĐ)" name="hanMucCongNo">
+            <Form.Item 
+              label="Hạn mức công nợ (VNĐ)" 
+              name="hanMucCongNo"
+              rules={[
+                { required: true, message: 'Vui lòng nhập hạn mức công nợ!' },
+                {
+                  validator: (_, value) =>
+                    value > 0
+                      ? Promise.resolve()
+                      : Promise.reject(new Error('Hạn mức công nợ phải lớn hơn 0 VNĐ!')),
+                },
+              ]}
+            >
               <InputNumber 
                 style={{ width: '100%' }} 
                 formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
                 parser={value => value.replace(/\$\s?|(,*)/g, '')}
-                min={0}
+                min={1} // Đổi từ 0 thành 1 chặn việc ấn nút lùi về 0
               />
             </Form.Item>
           </Col>
