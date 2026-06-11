@@ -13,7 +13,6 @@ const NguoiDungPage = () => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   
-  // Bộ lọc
   const [search, setSearch] = useState('');
   const [vaiTro, setVaiTro] = useState(null);
   const [trangThai, setTrangThai] = useState(null);
@@ -29,11 +28,8 @@ const NguoiDungPage = () => {
         setData(res.data);
         setTotal(res.pagination.total);
       }
-    } catch (error) {
-      message.error('Lỗi tải danh sách người dùng');
-    } finally {
-      setLoading(false);
-    }
+    } catch (error) { message.error('Lỗi tải danh sách người dùng'); } 
+    finally { setLoading(false); }
   };
 
   useEffect(() => { fetchData(); }, [page, limit, search, vaiTro, trangThai]);
@@ -42,16 +38,9 @@ const NguoiDungPage = () => {
     setEditingId(record?.id || null);
     if (record) {
       form.setFieldsValue({
-        tenDangNhap: record.ten_dang_nhap,
-        hoTen: record.ho_ten,
-        email: record.email,
-        soDienThoai: record.so_dien_thoai,
-        vaiTro: record.vai_tro,
-        // Không set lại mật khẩu khi sửa (để trống nếu không muốn đổi)
+        tenDangNhap: record.ten_dang_nhap, hoTen: record.ho_ten, email: record.email, soDienThoai: record.so_dien_thoai, vaiTro: record.vai_tro,
       });
-    } else {
-      form.resetFields();
-    }
+    } else { form.resetFields(); }
     setIsModalVisible(true);
   };
 
@@ -66,63 +55,64 @@ const NguoiDungPage = () => {
       }
       setIsModalVisible(false);
       fetchData();
-    } catch (error) { 
-      message.error(error?.error?.message || 'Có lỗi xảy ra, có thể Tên đăng nhập đã tồn tại'); 
-    }
+    } catch (error) { message.error(error?.error?.message || 'Có lỗi xảy ra, có thể Tên đăng nhập đã tồn tại'); }
   };
 
   const handleToggleLock = (record) => {
+    // BẢO VỆ TUYỆT ĐỐI TÀI KHOẢN ADMIN GỐC
+    if (record.ten_dang_nhap === 'admin' || record.id === 1) {
+       return message.error('Lỗi bảo mật: Không được phép khóa tài khoản Quản trị viên gốc!');
+    }
+
     const isLocking = record.trang_thai === 'ACTIVE';
     Modal.confirm({
       title: isLocking ? 'Khóa tài khoản này?' : 'Mở khóa tài khoản này?',
-      content: isLocking ? 'Người này sẽ không thể đăng nhập vào hệ thống nữa.' : 'Họ sẽ có thể đăng nhập bình thường.',
+      content: isLocking ? 'Người này sẽ bị văng ra và không thể đăng nhập vào hệ thống nữa.' : 'Họ sẽ có thể đăng nhập bình thường.',
       okType: isLocking ? 'danger' : 'primary',
       onOk: async () => {
         try {
           await danhMucService.khoaNguoiDung(record.id);
-          message.success(`Đã ${isLocking ? 'khóa' : 'mở khóa'} tài khoản`);
+          message.success(`Đã ${isLocking ? 'khóa' : 'mở khóa'} tài khoản thành công`);
           fetchData();
-        } catch (error) { 
-          message.error('Lỗi thao tác'); 
-        }
+        } catch (error) { message.error('Lỗi thao tác'); }
       }
     });
   };
 
   const columns = [
-    { title: 'Tên đăng nhập', dataIndex: 'ten_dang_nhap', fontWeight: 'bold' },
-    { title: 'Họ tên', dataIndex: 'ho_ten' },
+    { title: 'Tên đăng nhập', dataIndex: 'ten_dang_nhap', fontWeight: 'bold', sorter: (a, b) => a.ten_dang_nhap.localeCompare(b.ten_dang_nhap) },
+    { title: 'Họ tên', dataIndex: 'ho_ten', sorter: (a, b) => a.ho_ten.localeCompare(b.ho_ten) },
     { title: 'Liên hệ', render: (_, r) => <div><div>{r.so_dien_thoai}</div><div style={{fontSize: 12, color: 'gray'}}>{r.email}</div></div> },
     { 
-      title: 'Vai trò', 
-      dataIndex: 'vai_tro',
+      title: 'Vai trò', dataIndex: 'vai_tro', sorter: (a, b) => a.vai_tro.localeCompare(b.vai_tro),
       render: (val) => {
         const colors = { MANAGER: 'magenta', SALE: 'blue', KE_TOAN: 'cyan' };
         return <Tag color={colors[val]}>{val}</Tag>;
       }
     },
     { 
-      title: 'Trạng thái', 
-      dataIndex: 'trang_thai', 
+      title: 'Trạng thái', dataIndex: 'trang_thai', sorter: (a, b) => a.trang_thai.localeCompare(b.trang_thai),
       render: (val) => <Tag color={val === 'ACTIVE' ? 'success' : 'error'}>{val}</Tag> 
     },
     {
       title: 'Thao tác', width: 120, align: 'center',
       render: (_, record) => {
-        // Không cho phép tự khóa/xóa chính tài khoản Admin cấp cao (Ví dụ ID 1 hoặc admin)
-        if (record.ten_dang_nhap === 'admin') return null; 
-
+        // Không cho phép hiện nút thao tác khóa đối với admin gốc
+        const isRootAdmin = record.ten_dang_nhap === 'admin' || record.id === 1;
+        
         return (
           <Space>
             <Button type="text" icon={<EditOutlined style={{ color: '#fa8c16' }}/>} onClick={() => openModal(record)} />
-            <Button 
-              type="text" 
-              danger={record.trang_thai === 'ACTIVE'} 
-              style={{ color: record.trang_thai !== 'ACTIVE' ? '#52c41a' : undefined }}
-              icon={record.trang_thai === 'ACTIVE' ? <LockOutlined /> : <UnlockOutlined />} 
-              onClick={() => handleToggleLock(record)} 
-              title={record.trang_thai === 'ACTIVE' ? "Khóa tài khoản" : "Mở khóa"}
-            />
+            {!isRootAdmin && (
+                <Button 
+                type="text" 
+                danger={record.trang_thai === 'ACTIVE'} 
+                style={{ color: record.trang_thai !== 'ACTIVE' ? '#52c41a' : undefined }}
+                icon={record.trang_thai === 'ACTIVE' ? <LockOutlined /> : <UnlockOutlined />} 
+                onClick={() => handleToggleLock(record)} 
+                title={record.trang_thai === 'ACTIVE' ? "Khóa tài khoản" : "Mở khóa"}
+                />
+            )}
           </Space>
         );
       }
@@ -132,8 +122,8 @@ const NguoiDungPage = () => {
   return (
     <Card bordered={false}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>Quản lý Người dùng</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => openModal()}>Cấp tài khoản</Button>
+        <Title level={4} style={{ margin: 0 }}>Quản lý Người dùng hệ thống</Title>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => openModal()}>Cấp tài khoản mới</Button>
       </div>
       
       <Space style={{ marginBottom: 16 }} wrap>
@@ -149,7 +139,7 @@ const NguoiDungPage = () => {
         </Select>
       </Space>
 
-      <Table columns={columns} dataSource={data} rowKey="id" loading={loading} pagination={{ current: page, pageSize: limit, total, onChange }} bordered />
+      <Table columns={columns} dataSource={data} rowKey="id" loading={loading} pagination={{ current: page, pageSize: limit, total, onChange, showSizeChanger: true }} bordered />
       
       <Modal title={editingId ? "Sửa thông tin" : "Cấp tài khoản mới"} open={isModalVisible} onCancel={() => setIsModalVisible(false)} onOk={() => form.submit()} destroyOnClose>
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
@@ -157,12 +147,7 @@ const NguoiDungPage = () => {
             <Form.Item name="tenDangNhap" label="Tên đăng nhập" rules={[{ required: true }]} style={{ width: 220 }}>
               <Input disabled={!!editingId} placeholder="Viết liền không dấu" />
             </Form.Item>
-            <Form.Item 
-              name="matKhau" 
-              label={editingId ? "Mật khẩu mới (Để trống nếu giữ nguyên)" : "Mật khẩu"} 
-              rules={[{ required: !editingId, message: 'Bắt buộc nhập' }]} 
-              style={{ width: 220 }}
-            >
+            <Form.Item name="matKhau" label={editingId ? "Mật khẩu mới (Để trống nếu giữ nguyên)" : "Mật khẩu"} rules={[{ required: !editingId, message: 'Bắt buộc nhập' }]} style={{ width: 220 }}>
               <Input.Password />
             </Form.Item>
           </Space>

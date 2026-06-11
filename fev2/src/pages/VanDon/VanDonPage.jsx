@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Select, Button, Table, Space, Typography, DatePicker, Checkbox, message, Tooltip, Modal, Form, InputNumber, Input, Tag } from 'antd';
-import { EyeOutlined, EditOutlined, CloseOutlined, PlusOutlined, FileDoneOutlined, SearchOutlined } from '@ant-design/icons';
+import { Card, Select, Button, Table, Space, Typography, DatePicker, message, Tooltip, Modal, Input, Tag } from 'antd';
+import { EyeOutlined, PlusOutlined, FileDoneOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import dayjs from 'dayjs';
 
 import { vanDonService } from '../../services/vanDonService';
 import { khachHangService } from '../../services/khachHangService';
 import { usePagination } from '../../hooks/usePagination';
 import StatusTag from '../../components/common/StatusTag';
 import CurrencyText from '../../components/common/CurrencyText';
-import { formatDate } from '../../utils/formatDate';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -22,35 +20,18 @@ const VanDonPage = () => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
   const [khachHangList, setKhachHangList] = useState([]);
-
+  
+  const [search, setSearch] = useState('');
   const [trangThai, setTrangThai] = useState(null);
   const [trangThaiThanhToan, setTrangThaiThanhToan] = useState(null);
   const [khachHangId, setKhachHangId] = useState(null);
   const [dateRange, setDateRange] = useState([]);
-  const [quaHan, setQuaHan] = useState(false);
-
-  // 🚀 FIX: Modal Cập nhật Thông tin (Đổi tên và dùng chung 1 form)
-  const [editModalVisible, setEditModalVisible] = useState(false);
-  const [currentVd, setCurrentVd] = useState(null);
-  const [editForm] = Form.useForm();
-
-  // 🚀 FIX: Thêm Modal Hủy Vận đơn đàng hoàng
-  const [cancelModalVisible, setCancelModalVisible] = useState(false);
-  const [currentCancelId, setCurrentCancelId] = useState(null);
-  const [cancelForm] = Form.useForm();
 
   const [pendingModalVisible, setPendingModalVisible] = useState(false);
   const [pendingList, setPendingList] = useState([]);
-  const [loadingPending, setLoadingPending] = useState(false);
-  const [pendingSearch, setPendingSearch] = useState('');
-
-  const [createModalVisible, setCreateModalVisible] = useState(false);
-  const [selectedTrip, setSelectedTrip] = useState(null);
-  const [selectedChiTietId, setSelectedChiTietId] = useState(null);
-  const [createForm] = Form.useForm();
 
   useEffect(() => {
-    khachHangService.getList({ limit: 1000 }).then(res => setKhachHangList(res.data));
+    khachHangService.getList({ limit: 1000 }).then(res => setKhachHangList(res.data?.data || res.data || []));
   }, []);
 
   const fetchData = async () => {
@@ -59,231 +40,97 @@ const VanDonPage = () => {
       const tuNgay = dateRange?.[0] ? dateRange[0].format('YYYY-MM-DD') : undefined;
       const denNgay = dateRange?.[1] ? dateRange[1].format('YYYY-MM-DD') : undefined;
       
-      const res = await vanDonService.getList({ 
-        page, limit, trangThai, trangThaiThanhToan, khachHangId, tuNgay, denNgay, quaHan: quaHan ? true : undefined 
-      });
+      const res = await vanDonService.getList({ page, limit, search, trangThai, trangThaiTT: trangThaiThanhToan, khachHangId, tuNgay, denNgay });
       if (res.success) {
-        setData(res.data);
-        setTotal(res.pagination.total);
+        setData(res.data?.data || res.data || []);
+        setTotal(res.pagination?.total || 0);
       }
-    } catch (error) { message.error('Lỗi tải danh sách vận đơn'); } 
+    } catch (error) { message.error('Lỗi lấy danh sách Vận đơn'); } 
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, [page, limit, trangThai, trangThaiThanhToan, khachHangId, dateRange, quaHan]);
-
-  // 🚀 FIX: Hàm mở Modal Cập nhật
-  const openEditModal = (record) => {
-    setCurrentVd(record);
-    editForm.setFieldsValue({ 
-      trongLuongThucTe: record.trong_luong_thuc_te || record.trong_luong_du_kien,
-      nguoiLienHeLay: record.nguoi_lien_he_lay,
-      nguoiLienHeGiao: record.nguoi_lien_he_giao
-    });
-    setEditModalVisible(true);
-  };
-
-  // 🚀 FIX: Gọi API Update chung (sẽ sửa API backend ở dưới)
-  const handleUpdateVd = async (values) => {
-    try {
-      await vanDonService.update(currentVd.id, values);
-      message.success('Cập nhật thông tin thành công!');
-      setEditModalVisible(false);
-      fetchData();
-    } catch (error) { message.error(error?.error?.message || 'Không thể cập nhật'); }
-  };
-
-  // 🚀 FIX: Hàm mở Modal Hủy
-  const handleCancelVd = (id) => {
-    setCurrentCancelId(id);
-    setCancelModalVisible(true);
-  };
-
-  // 🚀 FIX: Hàm Submit form Hủy
-  const submitCancelVd = async (values) => {
-    try {
-      await vanDonService.huyVanDon(currentCancelId, values.lyDoHuy); 
-      message.success('Đã hủy vận đơn');
-      setCancelModalVisible(false);
-      cancelForm.resetFields();
-      fetchData();
-    } catch (error) { message.error(error?.error?.message || 'Không thể hủy vận đơn này'); }
-  };
+  useEffect(() => { fetchData(); }, [page, limit, search, trangThai, trangThaiThanhToan, khachHangId, dateRange]);
 
   const openPendingList = async () => {
     setPendingModalVisible(true);
-    setLoadingPending(true);
-    setPendingSearch('');
     try {
       const res = await vanDonService.getPendingList(); 
-      setPendingList(res.data);
-    } catch (error) {
-      message.error('Không thể tải danh sách chờ');
-    } finally {
-      setLoadingPending(false);
-    }
+      setPendingList(res.data || []);
+    } catch (e) { message.error('Lỗi lấy danh sách chờ'); }
   };
 
-  const startCreateVanDon = (trip) => {
-    setSelectedTrip(trip);
-    setSelectedChiTietId(trip.bao_gia_chi_tiet_id);
-    setPendingModalVisible(false); 
-    setCreateModalVisible(true);   
-  };
-
-  const submitCreateVanDon = async (values) => {
+  // 🚀 UX MAGIC: TẠO 1 CHẠM, BỎ QUA MODAL NHẬP TRUNG GIAN
+  const handleOneClickCreate = async (booking) => {
     try {
+      message.loading({ content: 'Đang khởi tạo Vận đơn...', key: 'create_vd' });
       const payload = {
-        baoGiaChiTietId: selectedChiTietId,
-        nguoiLienHeLay: values.nguoiLienHeLay,
-        nguoiLienHeGiao: values.nguoiLienHeGiao,
-        ngayVanChuyen: values.ngayVanChuyen.format('YYYY-MM-DD'),
-        ngayHetHanThanhToan: values.ngayHetHanThanhToan.format('YYYY-MM-DD') 
+        bookingId: booking.id || booking.booking_id,
+        nguoiGuiTen: booking.nguoi_gui_ten,
+        nguoiGuiSdt: booking.nguoi_gui_sdt,
+        nguoiNhanTen: booking.nguoi_nhan_ten,
+        nguoiNhanSdt: booking.nguoi_nhan_sdt,
+        hinhThucThanhToan: booking.loai_khach === 'B2C_VANG_LAI' ? 'TRA_TRUOC' : 'GHI_NO',
+        tienCodThuHo: 0
       };
-      await vanDonService.create(payload);
-      message.success('Tạo Vận đơn thành công!');
-      setCreateModalVisible(false);
-      createForm.resetFields();
-      fetchData(); 
-    } catch (error) {
-      message.error(error?.error?.message || 'Lỗi khi tạo vận đơn');
+      
+      const res = await vanDonService.createFromQuotation(payload);
+      message.success({ content: 'Tạo thành công! Đang chuyển hướng...', key: 'create_vd' });
+      setPendingModalVisible(false);
+      navigate(`/van-don/${res.data.ma_van_don || res.data.id}`);
+    } catch (error) { 
+      message.error({ content: error?.error?.message || error?.message || 'Lỗi khởi tạo', key: 'create_vd' }); 
     }
   };
 
   const columns = [
-    { title: 'Mã VĐ', dataIndex: 'id', render: (val) => <span style={{fontWeight: 500}}>{val}</span> },
-    { title: 'Khách', dataIndex: 'ten_cong_ty' }, 
-    { 
-      title: 'Hạn TT', 
-      dataIndex: 'ngay_het_han_thanh_toan', 
-      render: (val, record) => {
-        const isOverdue = record.trang_thai_thanh_toan !== 'PAID' && dayjs().startOf('day').isAfter(dayjs(val), 'day');
-        return <Text type={isOverdue ? 'danger' : ''} strong={isOverdue}>{formatDate(val)}</Text>;
-      }
-    },
-    { title: 'Giá trị', dataIndex: 'gia_tri', align: 'right', render: (val) => <CurrencyText value={val} /> },
-    { 
-      title: 'TT TT', 
-      dataIndex: 'trang_thai_thanh_toan', 
-      align: 'center', 
-      render: (val, record) => (
-        <Space direction="vertical" size={0}>
-          <StatusTag status={val} />
-          {record.trang_thai === 'CANCELLED' && <StatusTag status="CANCELLED" />}
-        </Space>
+    { title: 'Mã VĐ', dataIndex: 'ma_van_don', render: (val) => <Text strong style={{color: '#1890ff'}}>{val}</Text> },
+    { title: 'Khách hàng', dataIndex: 'ten_cong_ty', render: (val, r) => <><Text strong>{val}</Text><br/><Text type="secondary" style={{fontSize: 11}}>Tạo bởi: ID {r.nguoi_tao_id}</Text></> }, 
+    { title: 'Giá trị chốt', dataIndex: 'so_tien_chot_cuoi', align: 'right', render: (val) => <CurrencyText value={val} style={{color: '#cf1322', fontWeight: 'bold'}} /> },
+    { title: 'Trạng thái VC', dataIndex: 'trang_thai_van_chuyen', align: 'center', render: (val) => <StatusTag status={val} /> },
+    { title: 'Thanh toán', dataIndex: 'trang_thai_thanh_toan', align: 'center', render: (val) => <Tag color={val === 'PAID' ? 'green' : val === 'PARTIAL' ? 'orange' : 'default'}>{val}</Tag> },
+    { title: 'Thao tác', align: 'center', render: (_, record) => (
+        <Tooltip title="Vào Bảng Điều Khiển"><Button type="primary" shape="circle" icon={<EyeOutlined />} onClick={() => navigate(`/van-don/${record.ma_van_don}`)} /></Tooltip>
       )
-    },
-    {
-      title: 'Thao tác', align: 'center', render: (_, record) => {
-        const canEdit = record.trang_thai === 'CONFIRMED' && record.trang_thai_thanh_toan === 'UNPAID';
-        return (
-          <Space size="small">
-            <Tooltip title="Xem chi tiết"><Button type="text" icon={<EyeOutlined />} onClick={() => navigate(`/van-don/${record.id}`)} /></Tooltip>
-            {canEdit && (
-              <>
-                <Tooltip title="Cập nhật Thông tin"><Button type="text" style={{ color: '#fa8c16' }} icon={<EditOutlined />} onClick={() => openEditModal(record)} /></Tooltip>
-                <Tooltip title="Hủy Vận đơn"><Button type="text" danger icon={<CloseOutlined />} onClick={() => handleCancelVd(record.id)} /></Tooltip>
-              </>
-            )}
-          </Space>
-        );
-      }
     }
   ];
 
   return (
     <Card bordered={false}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
-        <Title level={4} style={{ margin: 0 }}>Danh sách Vận đơn</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openPendingList}>Tạo Vận đơn mới</Button>
+        <Title level={4} style={{ margin: 0 }}>Quản lý Vận đơn (Waybills)</Title>
+        <Button type="primary" style={{ background: '#52c41a' }} icon={<PlusOutlined />} onClick={openPendingList}>Kéo đơn từ Báo Giá</Button>
       </div>
 
       <Space style={{ marginBottom: 16 }} wrap>
-        <Select placeholder="Trạng thái" style={{ width: 140 }} allowClear onChange={setTrangThai}>
-          <Option value="CONFIRMED">CONFIRMED</Option>
-          <Option value="CANCELLED">CANCELLED</Option>
+        <Input.Search placeholder="Tìm mã VĐ hoặc tên khách..." allowClear onSearch={setSearch} style={{ width: 250 }} />
+        <Select placeholder="Trạng thái Vận chuyển" style={{ width: 180 }} allowClear onChange={setTrangThai}>
+          <Option value="CHO_LAY">Chờ lấy hàng</Option>
+          <Option value="DANG_CHAY">Đang chạy tuyến</Option>
+          <Option value="DA_GIAO">Đã giao</Option>
+          <Option value="CANCELLED">Đã hủy</Option>
         </Select>
         <Select placeholder="Thanh toán" style={{ width: 140 }} allowClear onChange={setTrangThaiThanhToan}>
-          <Option value="UNPAID">UNPAID</Option>
-          <Option value="PARTIAL">PARTIAL</Option>
-          <Option value="PAID">PAID</Option>
+          <Option value="UNPAID">Chưa thanh toán</Option>
+          <Option value="PAID">Đã thanh toán</Option>
         </Select>
-        <Select showSearch placeholder="Khách hàng" style={{ width: 200 }} allowClear onChange={setKhachHangId} optionFilterProp="children" options={khachHangList.map(kh => ({ value: kh.id, label: kh.ten_cong_ty }))} />
+        <Select showSearch placeholder="Khách hàng" style={{ width: 200 }} allowClear onChange={setKhachHangId} filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())} options={khachHangList.map(kh => ({ value: kh.id, label: kh.ten_cong_ty }))} />
         <RangePicker format="DD/MM/YYYY" onChange={setDateRange} style={{ width: 250 }} />
-        <Checkbox checked={quaHan} onChange={(e) => setQuaHan(e.target.checked)}>Quá hạn TT</Checkbox>
       </Space>
 
-      <Table columns={columns} dataSource={data} rowKey="id" loading={loading} pagination={{ current: page, pageSize: limit, total: total, onChange: onChange }} bordered />
+      <Table columns={columns} dataSource={data} rowKey="ma_van_don" loading={loading} pagination={{ current: page, pageSize: limit, total: total, onChange: onChange }} bordered />
 
-      {/* 🚀 FIX: Modal Cập nhật Thông tin (Gộp chung Trọng lượng + Liên hệ) */}
-      <Modal title={`Cập nhật Thông tin VĐ - ${currentVd?.id}`} open={editModalVisible} onCancel={() => setEditModalVisible(false)} onOk={() => editForm.submit()} destroyOnClose>
-        <Form form={editForm} layout="vertical" onFinish={handleUpdateVd}>
-          <Form.Item name="trongLuongThucTe" label="Trọng lượng thực tế (kg)" rules={[{ required: true, message: 'Vui lòng nhập' }]}>
-            <InputNumber style={{ width: '100%' }} min={1} />
-          </Form.Item>
-          <Form.Item name="nguoiLienHeLay" label="Người liên hệ lấy hàng (Kho đi)" rules={[{ required: true, message: 'Vui lòng nhập' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="nguoiLienHeGiao" label="Người liên hệ nhận hàng (Kho đến)" rules={[{ required: true, message: 'Vui lòng nhập' }]}>
-            <Input />
-          </Form.Item>
-          <div style={{ color: '#8c8c8c' }}>* Hệ thống sẽ tự động tính lại giá trị Vận đơn dựa trên bảng giá.</div>
-        </Form>
-      </Modal>
-
-      {/* 🚀 FIX: Modal Hủy Đơn */}
-      <Modal title="Xác nhận Hủy Vận đơn" open={cancelModalVisible} onCancel={() => setCancelModalVisible(false)} onOk={() => cancelForm.submit()} destroyOnClose okType="danger" okText="Xác nhận Hủy">
-        <Form form={cancelForm} layout="vertical" onFinish={submitCancelVd}>
-          <Form.Item name="lyDoHuy" label="Lý do hủy" rules={[{ required: true, message: 'Vui lòng nhập lý do' }]}>
-            <Input.TextArea rows={3} placeholder="Ví dụ: Khách báo hoãn chuyến..." />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* --- CÁC MODAL KHÁC GIỮ NGUYÊN NHƯ CŨ --- */}
-      <Modal title="Chọn Chuyến hàng để tạo Vận Đơn" open={pendingModalVisible} onCancel={() => setPendingModalVisible(false)} footer={null} width={900} destroyOnClose>
-        <Input placeholder="Gõ tên khách hàng để tìm nhanh..." prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />} style={{ width: 300, marginBottom: 16 }} allowClear onChange={(e) => setPendingSearch(e.target.value)} />
+      <Modal title="Chọn Chuyến hàng (Booking) đã được duyệt" open={pendingModalVisible} onCancel={() => setPendingModalVisible(false)} footer={null} width={900}>
         <Table 
-          dataSource={pendingList.filter(item => item.ten_cong_ty?.toLowerCase().includes(pendingSearch.toLowerCase()))} 
-          rowKey="bao_gia_chi_tiet_id" loading={loadingPending} pagination={{ pageSize: 5 }}
+          dataSource={pendingList} rowKey={(r) => r.id || r.booking_id} pagination={{ pageSize: 5 }}
           columns={[
-            { title: 'Báo giá', dataIndex: 'bao_gia_id', render: val => <Text strong>BG-{val}</Text> },
-            { title: 'Khách hàng', dataIndex: 'ten_cong_ty' },
-            { title: 'Tuyến đường', render: (_, r) => `${r.tinh_di} ➔ ${r.tinh_den}` },
-            { title: 'Loại hàng', dataIndex: 'ten_loai_hang', render: val => <Tag color="blue">{val}</Tag> },
-            { title: 'Giá trị', dataIndex: 'thanh_tien', align: 'right', render: val => <CurrencyText value={val} /> },
-            { title: 'Thao tác', align: 'center', render: (_, record) => (
-                <Button type="primary" size="small" icon={<FileDoneOutlined />} onClick={() => startCreateVanDon(record)}>Tạo VĐ</Button>
-              )
-            }
+            { title: 'Mã Booking', dataIndex: 'id', render: val => <Text strong>{val}</Text> },
+            { title: 'Khách', dataIndex: 'ten_cong_ty' },
+            { title: 'Tuyến', render: (_, r) => `${r.diem_lay_chi_tiet} ➔ ${r.diem_giao_chi_tiet}` },
+            { title: 'Thao tác', align: 'center', render: (_, record) => <Button type="primary" size="small" icon={<FileDoneOutlined />} onClick={() => handleOneClickCreate(record)}>Tạo Vận Đơn</Button> }
           ]}
         />
-      </Modal>
-
-      <Modal title="Khởi tạo Vận đơn thực tế" open={createModalVisible} onCancel={() => setCreateModalVisible(false)} onOk={() => createForm.submit()} destroyOnClose>
-        {selectedTrip && (
-          <div style={{ padding: 12, backgroundColor: '#e6f7ff', borderRadius: 6, marginBottom: 16, borderLeft: '4px solid #1890ff' }}>
-            Đang tạo Vận đơn cho Báo giá <Text strong>BG-{selectedTrip.bao_gia_id}</Text> ({selectedTrip.ten_cong_ty}) <br/>
-            Tuyến: <Text strong>{selectedTrip.tinh_di} ➔ {selectedTrip.tinh_den}</Text>
-          </div>
-        )}
-        <Form form={createForm} layout="vertical" onFinish={submitCreateVanDon}>
-          <Form.Item name="ngayVanChuyen" label="Ngày vận chuyển (Dự kiến đi)" rules={[{ required: true }]}>
-            <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
-          </Form.Item>
-          <Form.Item name="nguoiLienHeLay" label="Thông tin người lấy hàng" rules={[{ required: true }]}>
-            <Input placeholder="Tên và SĐT người ở kho bốc..." />
-          </Form.Item>
-          <Form.Item name="nguoiLienHeGiao" label="Thông tin người nhận hàng" rules={[{ required: true }]}>
-            <Input placeholder="Tên và SĐT người nhận hàng..." />
-          </Form.Item>
-          <Form.Item name="ngayHetHanThanhToan" label="Hạn chót thanh toán" rules={[{ required: true }]}>
-            <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
-          </Form.Item>
-        </Form>
       </Modal>
     </Card>
   );
 };
-
 export default VanDonPage;

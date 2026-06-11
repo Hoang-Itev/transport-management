@@ -1,11 +1,6 @@
 import React, { useState, useEffect } from 'react';
-// import { Card, Form, Input, InputNumber, Button, Select, DatePicker, message, Divider, Typography, Row, Col, Checkbox } from 'antd';
-// import { ArrowLeftOutlined, SaveOutlined, CheckCircleFilled } from '@ant-design/icons';
-
-// Thay thế 2 dòng import cũ bằng 2 dòng này:
 import { Card, Form, Input, InputNumber, Button, Select, DatePicker, message, Divider, Typography, Row, Col, Checkbox, Upload } from 'antd';
 import { ArrowLeftOutlined, SaveOutlined, CheckCircleFilled, ScanOutlined } from '@ant-design/icons';
-
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 
@@ -21,44 +16,16 @@ const PhieuThuForm = () => {
   const [form] = Form.useForm();
   const navigate = useNavigate();
   
-
   const [loading, setLoading] = useState(false);
-  
-  // 🚀 THÊM ĐOẠN CODE AI NÀY VÀO DƯỚI STATE LOADING
   const [scanning, setScanning] = useState(false);
-
-  const handleScanBill = async ({ file, onSuccess, onError }) => {
-    setScanning(true);
-    try {
-      const formData = new FormData();
-      formData.append('billImage', file);
-      
-      const res = await phieuThuService.scanBill(formData);
-      
-      if (res.success && res.data.tongSoTien > 0) {
-        // Tự động điền số tiền AI đọc được vào Form
-        form.setFieldsValue({ tongSoTien: res.data.tongSoTien });
-        setTongTienPhieu(res.data.tongSoTien);
-        message.success('🤖 AI đã nhận diện thành công số tiền!');
-        onSuccess("ok");
-      } else {
-        message.warning(res.message || 'AI không tìm thấy số tiền hợp lệ, vui lòng nhập tay.');
-        onError("AI failed to read amount");
-      }
-    } catch (error) {
-      message.error('Lỗi khi quét bill. Backend chưa sẵn sàng hoặc file quá lớn.');
-      onError(error);
-    } finally {
-      setScanning(false);
-    }
-  };
-  // ---------------------------------------------
 
   const [khachHangList, setKhachHangList] = useState([]);
   const [vanDonList, setVanDonList] = useState([]); 
-
   const [tongTienPhieu, setTongTienPhieu] = useState(0);
   const [allocations, setAllocations] = useState({}); 
+
+  // Lưu trữ mã vận đơn AI quét được để auto-tick
+  const [aiDetectedVanDons, setAiDetectedVanDons] = useState([]);
 
   const generateRefCode = (hinhThuc) => {
     const prefix = hinhThuc === 'TIEN_MAT' ? 'TM' : 'CK';
@@ -70,51 +37,133 @@ const PhieuThuForm = () => {
     khachHangService.getList({ limit: 1000 }).then(res => setKhachHangList(res.data));
   }, []);
 
-  const handleKhachHangChange = async (khachHangId) => {
+  // 🚀 FIX: Thêm tham số aiAmount để truyền số tiền AI vừa quét vào thẳng thuật toán rót nước
+  const handleKhachHangChange = async (khachHangId, autoTickCodes = [], aiAmount = null) => {
     setAllocations({});
     setVanDonList([]);
     if (!khachHangId) return;
 
     try {
-      const res = await vanDonService.getList({ khachHangId, trangThai: 'CONFIRMED', limit: 1000 });
+      const res = await vanDonService.getList({ khachHangId, limit: 1000 });
+      
       if (res.success) {
-        const unpaids = res.data.filter(vd => vd.trang_thai_thanh_toan !== 'PAID');
-        
+        const rawData = res.data?.data || res.data || [];
+        const unpaids = rawData.filter(vd => vd.trang_thai_thanh_toan !== 'PAID' && vd.trang_thai_van_chuyen !== 'CANCELLED');
+
         const processed = unpaids.map(vd => {
           const daThu = Number(vd.da_thu || 0);
           return {
             ...vd,
+            ma_van_don: vd.ma_van_don, 
             daThu: daThu,
-            conLai: Number(vd.gia_tri) - daThu
+            conLai: Number(vd.so_tien_chot_cuoi) - daThu 
           };
         });
+        
         setVanDonList(processed);
+
+        const codesToTick = autoTickCodes.length > 0 ? autoTickCodes : aiDetectedVanDons;
+
+        if (codesToTick.length > 0) {
+          const newAlloc = {};
+          const normalizeString = (str) => String(str).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+          const aiNormalizedList = codesToTick.map(code => normalizeString(code));
+
+          // 🚀 THUẬT TOÁN RÓT NƯỚC (WATERFALL): Dội tiền từ trên xuống dưới
+          let remainingMoney = aiAmount !== null ? Number(aiAmount) : Number(tongTienPhieu || 0);
+
+          processed.forEach(vd => {
+            const dbNormalizedCode = normalizeString(vd.ma_van_don);
+            if (aiNormalizedList.includes(dbNormalizedCode)) {
+              // Lấy mức tối thiểu giữa "Tiền còn nợ của đơn" và "Tiền phiếu thu còn dư"
+              const amountToAllocate = Math.min(vd.conLai, remainingMoney > 0 ? remainingMoney : 0);
+              newAlloc[vd.ma_van_don] = amountToAllocate;
+              
+              // Trừ đi số tiền vừa phân bổ để rót cho đơn tiếp theo
+              remainingMoney -= amountToAllocate; 
+            }
+          });
+          
+          if (Object.keys(newAlloc).length > 0) {
+            setAllocations(newAlloc);
+            message.info('✨ Đã tự động phân bổ tiền vào các Vận đơn khớp với ảnh Bill!');
+          }
+        }
       }
     } catch (error) { message.error('Lỗi tải danh sách vận đơn'); }
   };
 
-  // 🚀 THUẬT TOÁN "RÓT NƯỚC": Tự động phân bổ lại khi người dùng sửa số Tổng Tiền Phiếu
+  const removeAccents = (str) => {
+    if (!str) return '';
+    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+  };
+
+  const handleScanBill = async ({ file, onSuccess, onError }) => {
+    setScanning(true);
+    try {
+      const formData = new FormData();
+      formData.append('billImage', file);
+      
+      const res = await phieuThuService.scanBill(formData);
+      
+      if (res.success && res.data.tongSoTien > 0) {
+        form.setFieldsValue({ tongSoTien: res.data.tongSoTien });
+        setTongTienPhieu(res.data.tongSoTien);
+
+        const aiName = removeAccents(res.data.tenNguoiChuyen || '');
+        const detectedCodes = res.data.maVanDonList || [];
+
+        if (detectedCodes.length > 0) {
+          setAiDetectedVanDons(detectedCodes);
+        }
+
+        if (aiName) {
+          const matchedKhach = khachHangList.find(kh => {
+            const dbName = removeAccents(kh.ten_cong_ty);
+            return dbName.includes(aiName) || aiName.includes(dbName);
+          });
+          
+          if (matchedKhach) {
+            form.setFieldsValue({ khachHangId: matchedKhach.id });
+            // 🚀 FIX: Truyền thêm số tiền AI quét được vào tham số thứ 3 để phục vụ Thuật toán Rót nước
+            handleKhachHangChange(matchedKhach.id, detectedCodes, res.data.tongSoTien); 
+            message.info(`Đã tự động chọn khách: ${matchedKhach.ten_cong_ty}`);
+          }
+        }
+        
+        message.success(`🤖 AI nhận diện số tiền: ${res.data.tongSoTien.toLocaleString()}đ!`);
+        onSuccess("ok");
+      } else {
+        message.warning(res.message || 'AI không tìm thấy số tiền hợp lệ, vui lòng nhập tay.');
+        onError("AI failed to read amount");
+      }
+    } catch (error) {
+      message.error('Lỗi khi quét bill bằng AI.');
+      onError(error);
+    } finally {
+      setScanning(false);
+    }
+  };
+
   useEffect(() => {
     const checkedIds = Object.keys(allocations);
-    if (checkedIds.length === 0) return; // Chưa tick cái nào thì bỏ qua
+    if (checkedIds.length === 0) return; 
 
     let remaining = tongTienPhieu || 0;
     const newAlloc = {};
 
-    // Duyệt qua các Vận đơn ĐANG ĐƯỢC TICK để rót tiền vào
     checkedIds.forEach(vdId => {
-      const vd = vanDonList.find(v => v.id === vdId);
+      const vd = vanDonList.find(v => v.ma_van_don === vdId);
       if (vd) {
-        // Lấy min giữa "Số tiền còn nợ của đơn này" và "Số tiền phiếu còn dư"
         const amount = Math.min(vd.conLai, remaining > 0 ? remaining : 0);
         newAlloc[vdId] = amount;
-        remaining -= amount; // Trừ dần số tiền phiếu
+        remaining -= amount; 
       }
     });
 
     setAllocations(newAlloc);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tongTienPhieu]); // Kích hoạt mỗi khi gõ lại ô TỔNG SỐ TIỀN
+  }, [tongTienPhieu]); 
 
   const handleTickVanDon = (vdId, checked, conLai) => {
     const newAlloc = { ...allocations };
@@ -172,24 +221,42 @@ const PhieuThuForm = () => {
         <Title level={4} style={{ margin: 0 }}>Tạo Phiếu Thu Mới</Title>
       </div>
 
-      <Form 
-        form={form} 
-        layout="vertical" 
-        onFinish={onFinish} 
-        initialValues={{ 
-          ngayThu: dayjs(),
-          hinhThuc: 'CHUYEN_KHOAN',
-          soThamChieu: generateRefCode('CHUYEN_KHOAN')
-        }}
-      >
-        <Divider orientation="left">Thông tin phiếu thu</Divider>
+      <Form form={form} layout="vertical" onFinish={onFinish} initialValues={{ ngayThu: dayjs(), hinhThuc: 'CHUYEN_KHOAN', soThamChieu: generateRefCode('CHUYEN_KHOAN') }}>
+        <Divider orientation="left">Thông tin hóa đơn (Quét AI trước để auto-tick)</Divider>
         <Row gutter={24}>
           <Col span={8}>
-            <Form.Item label="Khách hàng" name="khachHangId" rules={[{ required: true }]}>
+            <Form.Item label="TỔNG SỐ TIỀN THU (VNĐ)" required>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <Form.Item name="tongSoTien" noStyle rules={[{ required: true, message: 'Nhập số tiền' }]}>
+                  <InputNumber style={{ width: '100%' }} min={1} size="large" onChange={(val) => setTongTienPhieu(val || 0)} />
+                </Form.Item>
+                <Upload customRequest={handleScanBill} showUploadList={false} accept="image/*">
+                  <Button size="large" type="dashed" icon={<ScanOutlined />} loading={scanning} style={{ borderColor: '#722ed1', color: '#722ed1' }}>
+                    Quét Bill AI
+                  </Button>
+                </Upload>
+              </div>
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item label="Hình thức thanh toán" name="hinhThuc" rules={[{ required: true }]}>
+              <Select placeholder="Chọn hình thức" onChange={(val) => form.setFieldsValue({ soThamChieu: generateRefCode(val) })}>
+                <Option value="CHUYEN_KHOAN">Chuyển khoản</Option>
+                <Option value="TIEN_MAT">Tiền mặt</Option>
+              </Select>
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item label="Số tham chiếu (Mã GD Ngân hàng)" name="soThamChieu">
+              <Input placeholder="VD: CK2026..." />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Row gutter={24}>
+          <Col span={8}>
+            <Form.Item label="Khách hàng (Nguồn tiền)" name="khachHangId" rules={[{ required: true }]}>
               <Select 
-                showSearch 
-                placeholder="Chọn khách hàng để load nợ..." 
-                // 🚀 FIX LỖI TÌM KIẾM TẠI ĐÂY
+                showSearch placeholder="Chọn khách hàng để load nợ..." 
                 optionFilterProp="label" 
                 filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
                 onChange={handleKhachHangChange}
@@ -203,56 +270,13 @@ const PhieuThuForm = () => {
             </Form.Item>
           </Col>
           <Col span={8}>
-            <Form.Item label="Hình thức thanh toán" name="hinhThuc" rules={[{ required: true }]}>
-              <Select placeholder="Chọn hình thức" onChange={(val) => form.setFieldsValue({ soThamChieu: generateRefCode(val) })}>
-                <Option value="CHUYEN_KHOAN">Chuyển khoản</Option>
-                <Option value="TIEN_MAT">Tiền mặt</Option>
-              </Select>
-            </Form.Item>
-          </Col>
-        </Row>
-        <Row gutter={24}>
-          <Col span={8}>
-            <Form.Item label="Số tham chiếu (Mã GD Ngân hàng)" name="soThamChieu">
-              <Input placeholder="VD: CK2026..." />
-            </Form.Item>
-          </Col>
-          {/* TÌM CỘT TỔNG SỐ TIỀN NÀY VÀ THAY BẰNG ĐOẠN MỚI NÀY */}
-          <Col span={8}>
-            <Form.Item label="TỔNG SỐ TIỀN THU (VNĐ)" required>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                
-                {/* 🚀 Bọc noStyle để chỉ điểm cho Ant Design biết chỗ nhận dữ liệu */}
-                <Form.Item name="tongSoTien" noStyle rules={[{ required: true, message: 'Nhập số tiền' }]}>
-                  <InputNumber 
-                    style={{ width: '100%' }} 
-                    min={1} 
-                    size="large" 
-                    onChange={(val) => setTongTienPhieu(val || 0)} 
-                  />
-                </Form.Item>
-                
-                <Upload 
-                  customRequest={handleScanBill} 
-                  showUploadList={false} 
-                  accept="image/*"
-                >
-                  <Button size="large" type="dashed" icon={<ScanOutlined />} loading={scanning} style={{ borderColor: '#52c41a', color: '#52c41a' }}>
-                    Quét AI
-                  </Button>
-                </Upload>
-
-              </div>
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item label="Ghi chú" name="ghiChu">
+            <Form.Item label="Ghi chú (Nội dung)" name="ghiChu">
               <Input placeholder="Lý do thu..." />
             </Form.Item>
           </Col>
         </Row>
 
-        <Divider orientation="left">Phân bổ vào vận đơn</Divider>
+        <Divider orientation="left">Danh sách Vận đơn cần thu</Divider>
         {vanDonList.length === 0 ? (
           <div style={{ color: 'gray', padding: 16, backgroundColor: '#fafafa', textAlign: 'center' }}>
             Vui lòng chọn Khách hàng (có phát sinh nợ) để tải danh sách vận đơn.
@@ -260,13 +284,14 @@ const PhieuThuForm = () => {
         ) : (
           <div style={{ backgroundColor: '#fafafa', padding: 16, borderRadius: 8, border: '1px solid #f0f0f0' }}>
             {vanDonList.map(vd => (
-              <Row key={vd.id} style={{ marginBottom: 16, alignItems: 'center' }}>
+              <Row key={vd.ma_van_don} style={{ marginBottom: 16, alignItems: 'center' }}>
                 <Col span={8}>
+                  {/* 🚀 FIX: Map đúng vd.ma_van_don để checkbox hoạt động */}
                   <Checkbox 
-                    checked={allocations[vd.id] !== undefined}
-                    onChange={(e) => handleTickVanDon(vd.id, e.target.checked, vd.conLai)}
+                    checked={allocations[vd.ma_van_don] !== undefined}
+                    onChange={(e) => handleTickVanDon(vd.ma_van_don, e.target.checked, vd.conLai)}
                   >
-                    <Text strong>{vd.id}</Text>
+                    <Text strong>{vd.ma_van_don}</Text>
                   </Checkbox>
                 </Col>
                 <Col span={8}>
@@ -285,9 +310,9 @@ const PhieuThuForm = () => {
                     placeholder="Số tiền phân bổ..."
                     min={0}
                     max={vd.conLai}
-                    value={allocations[vd.id]}
-                    onChange={(val) => handleAmountChange(vd.id, val, vd.conLai)}
-                    disabled={allocations[vd.id] === undefined}
+                    value={allocations[vd.ma_van_don]}
+                    onChange={(val) => handleAmountChange(vd.ma_van_don, val, vd.conLai)}
+                    disabled={allocations[vd.ma_van_don] === undefined}
                   />
                 </Col>
               </Row>

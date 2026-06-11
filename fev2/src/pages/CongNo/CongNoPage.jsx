@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Space, Typography, Checkbox, Input, Button, Row, Col, Divider, Spin, Tag, message } from 'antd';
-import { DownloadOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import { Card, Table, Space, Typography, Checkbox, Input, Button, Row, Col, Spin, Tag, message, Tabs, Statistic, Modal } from 'antd';
+import { DownloadOutlined, ExclamationCircleOutlined, InfoCircleOutlined, MailOutlined } from '@ant-design/icons';
 import { congNoService } from '../../services/congNoService';
 import CurrencyText from '../../components/common/CurrencyText';
 import { formatDate } from '../../utils/formatDate';
@@ -10,20 +10,18 @@ const { Title, Text } = Typography;
 
 const CongNoPage = () => {
   const { page, limit, total, setTotal, onChange } = usePagination(10);
-  
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
+  const [globalDebt, setGlobalDebt] = useState(0); // 🚀 FIX: Lưu tổng nợ toàn cục từ Backend
   
-  // Bộ lọc
   const [search, setSearch] = useState('');
   const [chiQuaHan, setChiQuaHan] = useState(false);
 
-  // Panel chi tiết bên phải
   const [selectedKh, setSelectedKh] = useState(null);
   const [detailData, setDetailData] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [sendingMail, setSendingMail] = useState(false);
 
-  // 1. Tải danh sách Tổng hợp
   const fetchList = async () => {
     setLoading(true);
     try {
@@ -31,174 +29,126 @@ const CongNoPage = () => {
       if (res.success) {
         setData(res.data);
         setTotal(res.pagination.total);
+        setGlobalDebt(res.globalTotalDebt || 0); // 🚀 Cập nhật tổng nợ toàn hệ thống
       }
-    } catch (error) {
-      message.error('Lỗi tải danh sách công nợ');
-    } finally {
-      setLoading(false);
-    }
+    } catch (error) { message.error('Lỗi tải danh sách công nợ'); } 
+    finally { setLoading(false); }
   };
 
-  // FIX LỖI UX: Tự động reset Panel bên phải khi đổi trang hoặc thay đổi bộ lọc
   useEffect(() => { 
     fetchList(); 
-    setSelectedKh(null);
-    setDetailData(null);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    setSelectedKh(null); setDetailData(null);
   }, [page, limit, chiQuaHan, search]); 
 
-  // 2. Tải Chi tiết khi click vào Khách hàng
   const fetchDetail = async (khachHangId) => {
     setDetailLoading(true);
     try {
       const res = await congNoService.getDetail(khachHangId);
-      if (res.success) {
-        setDetailData(res.data);
-      }
-    } catch (error) {
-      message.error('Lỗi tải chi tiết công nợ khách hàng');
-      setDetailData(null);
-    } finally {
-      setDetailLoading(false);
-    }
+      if (res.success) setDetailData(res.data);
+    } catch (error) { message.error('Lỗi tải chi tiết'); setDetailData(null); } 
+    finally { setDetailLoading(false); }
   };
 
   const handleRowClick = (record) => {
-    setSelectedKh(record);
-    fetchDetail(record.khachHangId);
+    setSelectedKh(record); fetchDetail(record.khachHangId);
   };
 
-  // 3. Xuất báo cáo
   const handleExport = async () => {
     try {
       message.loading({ content: 'Đang tạo file Excel...', key: 'export' });
-      await congNoService.exportExcel({ format: 'excel' });
+      await congNoService.exportExcel({ format: 'excel', search, quaHan: chiQuaHan });
       message.success({ content: 'Tải xuống thành công!', key: 'export' });
-    } catch (error) {
-      message.error({ content: 'Lỗi xuất báo cáo', key: 'export' });
-    }
+    } catch (error) { message.error({ content: 'Lỗi xuất báo cáo', key: 'export' }); }
   };
 
-  // --- CẤU HÌNH CỘT CHO BẢNG TRÁI ---
+  const handleSendAllMails = () => {
+    Modal.confirm({
+      title: 'Xác nhận Nhắc Nợ Hàng Loạt',
+      content: 'Hệ thống sẽ gửi Email nhắc nhở đến TẤT CẢ khách hàng B2B đang có tổng nợ > 0. Quá trình này sẽ chạy ngầm và mất vài phút. Bạn có muốn tiếp tục?',
+      okText: 'Gửi Email',
+      onOk: async () => {
+        try {
+          setSendingMail(true);
+          const res = await congNoService.guiMailNhacNoToanBo();
+          message.success(res.message || 'Đã kích hoạt robot gửi email hàng loạt!');
+        } catch (error) {
+          message.error('Lỗi gửi email hàng loạt');
+        } finally {
+          setSendingMail(false);
+        }
+      }
+    });
+  };
+
   const columns = [
     { title: 'Khách hàng', dataIndex: 'tenCongTy', fontWeight: 'bold' },
     { title: 'Hạn mức', dataIndex: 'hanMucCongNo', align: 'right', render: val => <CurrencyText value={val} /> },
-    { title: 'Công nợ hiện tại', dataIndex: 'congNoHienTai', align: 'right', render: val => <CurrencyText value={val} style={{ color: '#cf1322', fontWeight: 500 }}/> },
-    { title: 'Còn lại phép', dataIndex: 'conLaiDuocPhepNo', align: 'right', render: val => <CurrencyText value={val} style={{ color: '#1890ff' }}/> },
-    { title: 'VĐ chưa thanh toán', dataIndex: 'soVanDonChuaTT', align: 'center' },
-    { 
-      title: 'Trạng thái', 
-      dataIndex: 'isQuaHan', 
-      align: 'center',
-      render: (isQuaHan) => isQuaHan 
-        ? <Tag color="error" icon={<ExclamationCircleOutlined />}>Quá hạn</Tag> 
-        : <Tag color="success">Trong hạn</Tag>
-    }
+    { title: 'Nợ hiện tại', dataIndex: 'congNoHienTai', align: 'right', render: val => <CurrencyText value={val} style={{ color: '#cf1322', fontWeight: 'bold' }}/> },
+    { title: 'VĐ chưa thu', dataIndex: 'soVanDonChuaTT', align: 'center', render: val => <Tag color="blue">{val} đơn</Tag> },
+    { title: 'Tình trạng', dataIndex: 'isQuaHan', align: 'center', render: (val) => val ? <Tag color="error" icon={<ExclamationCircleOutlined />}>Quá hạn</Tag> : <Tag color="success">An toàn</Tag> }
   ];
-
-  // Tính tổng nợ (Chỉ của trang hiện tại đang hiển thị)
-  const tongNoToanCuc = data.reduce((sum, item) => sum + Number(item.congNoHienTai || 0), 0);
 
   return (
     <Card bordered={false}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24, alignItems: 'center' }}>
         <Space size="large">
-          <Title level={4} style={{ margin: 0 }}>Công nợ khách hàng</Title>
-          {/* FIX LỖI LOGIC: Đổi nhãn để tránh gây hoang mang cho kế toán */}
-          <Text style={{ fontSize: 16 }}>Tổng nợ (Trang này): <CurrencyText value={tongNoToanCuc} style={{ color: '#cf1322', fontSize: 18, fontWeight: 'bold' }} /></Text>
+          <Title level={4} style={{ margin: 0 }}>Quản lý Công Nợ Doanh Nghiệp (B2B)</Title>
+          <Tag color="cyan" style={{ fontSize: 14, padding: '4px 8px' }}>
+            Tổng nợ toàn cục: <CurrencyText value={globalDebt} style={{ color: '#cf1322', fontWeight: 'bold' }} />
+          </Tag>
         </Space>
-        <Button type="primary" icon={<DownloadOutlined />} onClick={handleExport}>Xuất Báo Cáo Excel</Button>
+        <Space>
+          <Button type="primary" style={{ background: '#722ed1' }} icon={<MailOutlined />} loading={sendingMail} onClick={handleSendAllMails}>Nhắc Nợ Toàn Bộ</Button>
+          <Button type="primary" icon={<DownloadOutlined />} onClick={handleExport}>Xuất Excel</Button>
+        </Space>
       </div>
 
       <Row gutter={24}>
-        {/* === CỘT TRÁI: DANH SÁCH KHÁCH HÀNG === */}
-        <Col span={14}>
+        <Col xs={24} lg={13}>
           <Space style={{ marginBottom: 16 }} wrap>
-            <Input.Search 
-              placeholder="Tìm tên khách hàng..." 
-              enterButton="Tìm kiếm"
-              style={{ width: 300 }} 
-              allowClear 
-              onSearch={(value) => setSearch(value)}
-              onChange={(e) => {
-                if (!e.target.value) {
-                  setSearch('');
-                }
-              }}
-            />
+            <Input.Search placeholder="Tìm tên công ty..." enterButton="Tìm kiếm" style={{ width: 300 }} allowClear onSearch={setSearch} onChange={(e) => { if (!e.target.value) setSearch(''); }} />
             <Checkbox checked={chiQuaHan} onChange={(e) => setChiQuaHan(e.target.checked)}>
-              <Text type="danger">Chỉ hiển thị Khách đang có nợ quá hạn</Text>
+              <Text type="danger">Lọc Khách hàng nợ quá hạn</Text>
             </Checkbox>
           </Space>
-
-          <Table 
-            columns={columns} 
-            dataSource={data} 
-            rowKey="khachHangId" 
-            loading={loading} 
-            pagination={{ current: page, pageSize: limit, total, onChange }} 
-            bordered
-            rowClassName={(record) => record.khachHangId === selectedKh?.khachHangId ? 'ant-table-row-selected' : ''}
-            onRow={(record) => ({
-              onClick: () => handleRowClick(record),
-              style: { cursor: 'pointer' }
-            })}
-          />
+          <Table columns={columns} dataSource={data} rowKey="khachHangId" loading={loading} pagination={{ current: page, pageSize: limit, total, onChange }} bordered rowClassName={(record) => record.khachHangId === selectedKh?.khachHangId ? 'ant-table-row-selected' : ''} onRow={(record) => ({ onClick: () => handleRowClick(record), style: { cursor: 'pointer' } })} />
         </Col>
 
-        {/* === CỘT PHẢI: PANEL CHI TIẾT === */}
-        <Col span={10}>
-          <Card 
-            title={selectedKh ? `Chi tiết công nợ: ${selectedKh.tenCongTy}` : 'Chi tiết công nợ'} 
-            style={{ height: '100%', minHeight: 400, backgroundColor: '#fafafa' }}
-          >
+        <Col xs={24} lg={11}>
+          <Card title={selectedKh ? `Hồ sơ nợ: ${selectedKh.tenCongTy}` : 'Chi tiết công nợ'} style={{ height: '100%', minHeight: 500, backgroundColor: '#fdfdfd', border: '1px solid #e8e8e8' }} headStyle={{ backgroundColor: '#f0f2f5' }}>
             {!selectedKh ? (
-              <div style={{ textAlign: 'center', color: '#bfbfbf', paddingTop: 100 }}>
-                Click vào 1 khách hàng bên trái để xem chi tiết
+              <div style={{ textAlign: 'center', color: '#bfbfbf', paddingTop: 120 }}>
+                <InfoCircleOutlined style={{ fontSize: 40, marginBottom: 16 }} /><br />Click chọn 1 Khách hàng bên trái để xem hồ sơ
               </div>
             ) : detailLoading ? (
-              <div style={{ textAlign: 'center', padding: 50 }}><Spin /></div>
+              <div style={{ textAlign: 'center', padding: 50 }}><Spin size="large" /></div>
             ) : detailData ? (
               <div>
-                <Space direction="vertical" size="small" style={{ display: 'flex', marginBottom: 24 }}>
-                  <Row><Col span={12}><Text type="secondary">Hạn mức tối đa:</Text></Col><Col span={12}><CurrencyText value={detailData.hanMucCongNo} /></Col></Row>
-                  <Row><Col span={12}><Text type="secondary">Nợ hiện tại:</Text></Col><Col span={12}><CurrencyText value={detailData.congNoHienTai} style={{ color: '#cf1322', fontWeight: 'bold' }}/></Col></Row>
-                  <Row><Col span={12}><Text type="secondary">Dư địa còn lại:</Text></Col><Col span={12}><CurrencyText value={detailData.conLaiDuocPhepNo} style={{ color: '#1890ff' }}/></Col></Row>
-                </Space>
-
-                <Divider orientation="left" style={{ margin: '12px 0' }}><Text style={{ fontSize: 13 }}>Vận đơn chưa thanh toán</Text></Divider>
-                <Table 
-                  size="small"
-                  dataSource={[...(detailData.vanDonQuaHan || []), ...(detailData.vanDonChuaTT || [])]} 
-                  rowKey="vanDonId"
-                  pagination={{ pageSize: 5 }}
-                  columns={[
-                    { title: 'Mã VĐ', dataIndex: 'vanDonId', render: val => <Text strong>{val}</Text> },
-                    { title: 'Hạn TT', dataIndex: 'ngayHetHanThanhToan', render: val => formatDate(val) },
-                    { title: 'Còn nợ', dataIndex: 'conLai', align: 'right', render: val => <CurrencyText value={val} /> },
-                    { 
-                      title: 'Trạng thái', 
-                      align: 'center',
-                      render: (_, r) => r.soNgayQuaHan 
-                        ? <Text type="danger">{r.soNgayQuaHan} ngày</Text> 
-                        : <Text type="success">Trong hạn</Text> 
-                    }
-                  ]}
-                />
-
-                <Divider orientation="left" style={{ margin: '12px 0' }}><Text style={{ fontSize: 13 }}>Lịch sử thanh toán gần đây</Text></Divider>
-                <Table 
-                  size="small"
-                  dataSource={detailData.lichSuThanhToan || []} 
-                  rowKey={(r) => r.maPhieuThu + r.vanDonId}
-                  pagination={{ pageSize: 5 }}
-                  columns={[
-                    { title: 'Phiếu', dataIndex: 'maPhieuThu' },
-                    { title: 'Ngày', dataIndex: 'ngayThu', render: val => formatDate(val) },
-                    { title: 'Hình thức', dataIndex: 'hinhThuc' },
-                    { title: 'Số tiền', dataIndex: 'soTienPhanBo', align: 'right', render: val => <CurrencyText value={val} style={{ color: '#52c41a' }} /> }
-                  ]}
-                />
+                <Row gutter={16} style={{ marginBottom: 20 }}>
+                  <Col span={8}><Statistic title="Hạn mức tối đa" value={detailData.hanMucCongNo} suffix="đ" valueStyle={{ fontSize: 16 }} /></Col>
+                  <Col span={8}><Statistic title="Nợ hiện tại" value={detailData.congNoHienTai} suffix="đ" valueStyle={{ color: '#cf1322', fontWeight: 'bold', fontSize: 18 }} /></Col>
+                  <Col span={8}><Statistic title="Dư địa còn lại" value={detailData.conLaiDuocPhepNo} suffix="đ" valueStyle={{ color: '#1890ff', fontSize: 16 }} /></Col>
+                </Row>
+                <Tabs defaultActiveKey="1" type="card">
+                  <Tabs.TabPane tab={`Chưa thanh toán (${detailData.vanDonChuaTT?.length || 0})`} key="1">
+                    <Table size="small" dataSource={detailData.vanDonChuaTT || []} rowKey="vanDonId" pagination={false} scroll={{ y: 350 }}
+                      columns={[
+                        { title: 'Mã VĐ', dataIndex: 'vanDonId', width: 120, render: val => <Text strong>{val}</Text> },
+                        { title: 'Hạn TT', dataIndex: 'ngayHetHanThanhToan', width: 100, render: val => formatDate(val) },
+                        { title: 'Còn nợ', dataIndex: 'conLai', align: 'right', width: 110, render: val => <CurrencyText value={val} style={{fontWeight: 500}} /> },
+                        { title: 'Trạng thái', align: 'center', render: (_, r) => r.soNgayQuaHan > 0 ? <Tag color="error">{r.soNgayQuaHan} ngày</Tag> : <Text type="success" style={{fontSize: 12}}>Trong hạn</Text> }
+                      ]} />
+                  </Tabs.TabPane>
+                  <Tabs.TabPane tab={`Lịch sử thu (${detailData.lichSuThanhToan?.length || 0})`} key="2">
+                    <Table size="small" dataSource={detailData.lichSuThanhToan || []} rowKey={(r) => r.maPhieuThu + r.vanDonId} pagination={false} scroll={{ y: 350 }}
+                      columns={[
+                        { title: 'Mã Phiếu', dataIndex: 'maPhieuThu', render: val => `PT-${val}` },
+                        { title: 'Ngày thu', dataIndex: 'ngayThu', render: val => formatDate(val) },
+                        { title: 'Hình thức', dataIndex: 'hinhThuc', render: val => val === 'TIEN_MAT' ? 'Tiền mặt' : 'Chuyển khoản' },
+                        { title: 'Số tiền', dataIndex: 'soTienPhanBo', align: 'right', render: val => <CurrencyText value={val} style={{ color: '#52c41a', fontWeight: 'bold' }} /> }
+                      ]} />
+                  </Tabs.TabPane>
+                </Tabs>
               </div>
             ) : null}
           </Card>
@@ -207,5 +157,4 @@ const CongNoPage = () => {
     </Card>
   );
 };
-
 export default CongNoPage;

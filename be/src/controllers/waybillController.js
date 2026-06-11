@@ -1,12 +1,20 @@
+// src/controllers/waybillController.js
 const Waybill = require('../models/waybillModel');
 const db = require('../config/database');
-const puppeteer = require('puppeteer'); // THÊM THƯ VIỆN TẠO PDF
+const puppeteer = require('puppeteer');
 const { sendWaybillEmail } = require('../services/emailService');
-
+const { sendTelegramMessage } = require('../services/telegramService');
+const pdfService = require('../services/pdfService');
+const fs = require('fs');
+const path = require('path');
 
 const getWaybills = async (req, res) => {
   try {
-    const result = await Waybill.findAll(req.query);
+    const filterQuery = {
+        ...req.query,
+        trangThaiThanhToan: req.query.trangThaiThanhToan || req.query.trangThaiTT
+    };
+    const result = await Waybill.findAll(filterQuery);
     res.json({ success: true, ...result });
   } catch (error) {
     res.status(500).json({ success: false, error: { message: error.message } });
@@ -16,138 +24,236 @@ const getWaybills = async (req, res) => {
 const getWaybillById = async (req, res) => {
   try {
     const waybill = await Waybill.findById(req.params.id);
-    if (!waybill) return res.status(404).json({ success: false, error: { code: 'VANDON_NOT_FOUND', message: 'Không tìm thấy vận đơn' } });
+    if (!waybill) return res.status(404).json({ success: false, error: { message: 'Không tìm thấy vận đơn' } });
     res.json({ success: true, data: waybill });
   } catch (error) {
     res.status(500).json({ success: false, error: { message: error.message } });
   }
 };
 
-const getConfirmedWaybills = async (req, res) => {
+const createFromQuotation = async (req, res) => {
   try {
-    const [rows] = await db.query(
-      `SELECT vd.*, kh.ten_cong_ty
-       FROM van_dons vd
-       JOIN bao_gia_chi_tiets ct ON vd.bao_gia_chi_tiet_id = ct.id
-       JOIN bao_gias bg ON ct.bao_gia_id = bg.id
-       JOIN khach_hangs kh ON bg.khach_hang_id = kh.id
-       WHERE vd.trang_thai = 'CONFIRMED'`
+    const { bookingId, nguoiGuiTen, nguoiGuiSdt, nguoiNhanTen, nguoiNhanSdt, hinhThucThanhToan, tienCodThuHo } = req.body;
+
+    const [bkRows] = await db.query(`
+      SELECT bk.*, bg.khach_hang_id, bg.trang_thai, kh.han_muc_no_toi_da, kh.tong_no_hien_tai, kh.ten_cong_ty, kh.loai_khach 
+      FROM bookings bk JOIN bao_gias bg ON bk.bao_gia_id = bg.id JOIN khach_hangs kh ON bg.khach_hang_id = kh.id
+      WHERE bk.id = ?`, [bookingId]
     );
-    res.json({ success: true, data: rows });
-  } catch (error) {
-    res.status(500).json({ success: false, error: { message: error.message } });
-  }
-};
 
-// FIX: Hàm tạo Vận đơn đã nhận ngày hạn thanh toán từ form
-// [POST] Tạo Vận đơn (và tự động gửi Email)
-const createWaybill = async (req, res) => {
-  try {
-    const { baoGiaChiTietId, nguoiLienHeLay, nguoiLienHeGiao, ngayVanChuyen, ngayHetHanThanhToan } = req.body;
+    if (bkRows.length === 0) return res.status(404).json({ success: false, message: 'Không tìm thấy Booking' });
+    const booking = bkRows[0];
 
-    const existing = await Waybill.findByChiTietId(baoGiaChiTietId);
-    if (existing) return res.status(409).json({ success: false, error: { code: 'VAN_DON_DA_TON_TAI', message: 'Chi tiết báo giá này đã có vận đơn' } });
+    if (booking.trang_thai !== 'ACCEPTED') return res.status(422).json({ success: false, message: 'Báo giá chưa được khách duyệt' });
 
-    const [ctRows] = await db.query(
-      `SELECT ct.*, bg.khach_hang_id, bg.trang_thai
-       FROM bao_gia_chi_tiets ct
-       JOIN bao_gias bg ON ct.bao_gia_id = bg.id
-       WHERE ct.id = ?`,
-      [baoGiaChiTietId]
-    );
-    if (!ctRows.length) return res.status(404).json({ success: false, error: { code: 'CHI_TIET_NOT_FOUND', message: 'Chi tiết báo giá không tồn tại' } });
-
-    const chiTiet = ctRows[0];
-
-    if (chiTiet.trang_thai !== 'ACCEPTED') {
-      return res.status(422).json({ success: false, error: { code: 'BAO_GIA_CHUA_ACCEPTED', message: 'Báo giá chưa được khách hàng chấp nhận' } });
+    if (booking.loai_khach === 'B2C_VANG_LAI' && hinhThucThanhToan === 'GHI_NO') {
+        return res.status(422).json({ success: false, message: 'Khách B2C không được phép công nợ' });
     }
 
-    const [khRows] = await db.query(
-      `SELECT han_muc_cong_no FROM khach_hangs WHERE id = ?`,
-      [chiTiet.khach_hang_id]
-    );
-    const khachHang = khRows[0];
+    const [ppRows] = await db.query(`SELECT SUM(so_tien_du_kien) as tong_phu_phi FROM booking_phu_phis WHERE booking_id = ?`, [bookingId]);
+    const tongPhuPhi = Number(ppRows[0].tong_phu_phi) || 0;
+    const soTienChotCuoi = Number(booking.tong_cuoc_chinh) + tongPhuPhi;
 
-    const congNoHienTai = await Waybill.checkCongNo(chiTiet.khach_hang_id);
-    const giaTriDuKien = Number(chiTiet.thanh_tien);
-
-    if (Number(khachHang.han_muc_cong_no) > 0 &&
-        Number(congNoHienTai) + giaTriDuKien > Number(khachHang.han_muc_cong_no)) {
-      return res.status(422).json({
-        success: false,
-        error: {
-          code: 'VUOT_HAN_MUC_CONG_NO',
-          message: `Khách hàng đã vượt hạn mức công nợ ${Number(khachHang.han_muc_cong_no).toLocaleString('vi-VN')} VNĐ`
-        }
-      });
+    if (hinhThucThanhToan === 'GHI_NO' && Number(booking.han_muc_no_toi_da) > 0) {
+      if ((Number(booking.tong_no_hien_tai) + soTienChotCuoi > Number(booking.han_muc_no_toi_da))) {
+        return res.status(422).json({ success: false, message: `Vượt hạn mức nợ` });
+      }
     }
 
-    // KHAI BÁO 1 LẦN DUY NHẤT Ở ĐÂY
-    const waybillId = await Waybill.create({
-      baoGiaChiTietId,
-      nguoiLienHeLay,
-      nguoiLienHeGiao,
-      ngayVanChuyen,
-      trongLuongDuKien: chiTiet.trong_luong,
-      giaTriDuKien,
-      giaTri: giaTriDuKien,
-      ngayHetHanThanhToan,
-      nguoiTaoId: req.user.id
+    const maVanDon = await Waybill.createTransaction({
+      bookingId, nguoiTaoId: req.user.id, 
+      nguoiGuiTen: nguoiGuiTen || booking.nguoi_gui_ten, nguoiGuiSdt: nguoiGuiSdt || booking.nguoi_gui_sdt, 
+      nguoiNhanTen: nguoiNhanTen || booking.nguoi_nhan_ten, nguoiNhanSdt: nguoiNhanSdt || booking.nguoi_nhan_sdt, 
+      tongCuocChinh: booking.tong_cuoc_chinh, tongPhuPhi, soTienChotCuoi,
+      hinhThucThanhToan, tienCodThuHo, khachHangId: booking.khach_hang_id
     });
 
-    // 🚀 TIẾN TRÌNH GỬI EMAIL NGẦM
-    try {
-      const [khRows2] = await db.query(`SELECT email, ten_cong_ty FROM khach_hangs WHERE id = ?`, [chiTiet.khach_hang_id]);
-      const khachHangMail = khRows2[0];
-
-      if (khachHangMail && khachHangMail.email) {
-        const mockReq = { params: { id: waybillId } };
-        const mockRes = {
-          setHeader: () => {},
-          send: (buffer) => {
-            // Nhớ đảm bảo bạn đã require sendWaybillEmail ở đầu file nhé
-            sendWaybillEmail(khachHangMail.email, khachHangMail.ten_cong_ty, waybillId, buffer)
-              .catch(e => console.log('Lỗi Background gửi mail VĐ:', e));
-          }
-        };
-        await module.exports.exportPdf(mockReq, mockRes);
-      }
-    } catch (err) {
-      console.log('Lỗi tiến trình gửi mail tự động VĐ:', err);
+    if (typeof sendTelegramMessage === 'function') {
+        const msg = `📦 ĐƠN MỚI: [${maVanDon}]\n👤 Khách: ${booking.ten_cong_ty}\n📍 Tuyến: ${booking.diem_lay_chi_tiet} -> ${booking.diem_giao_chi_tiet}\n💵 Tổng: ${soTienChotCuoi.toLocaleString()}đ\n💳 TT: ${hinhThucThanhToan}`;
+        sendTelegramMessage(msg);
     }
 
-    res.status(201).json({ success: true, message: 'Tạo vận đơn thành công', data: { id: waybillId } });
+    res.status(201).json({ success: true, message: 'Tạo Vận đơn thành công', data: { ma_van_don: maVanDon } });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+
+const createDirectly = async (req, res) => {
+  try {
+    const result = await Waybill.createDirectTransaction(req.body, req.user.id);
+    res.status(201).json({ success: true, message: 'Phát hành Vận đơn B2C thành công', data: result });
   } catch (error) {
     res.status(500).json({ success: false, error: { message: error.message } });
   }
 };
 
-const updateActualWeight = async (req, res) => {
+const finalizeNumbers = async (req, res) => {
   try {
     const { id } = req.params;
-    const { trongLuongThucTe } = req.body;
+    // 🚀 1. Nhận thêm các trường thông tin thay đổi từ màn hình Detail
+    const { 
+      trongLuongChot, kichThuocChot, 
+      nguoi_gui_ten, nguoi_gui_sdt, 
+      nguoi_nhan_ten, nguoi_nhan_sdt, 
+      hinh_thuc_thanh_toan, tien_cod_thu_ho 
+    } = req.body;
 
-    const waybill = await Waybill.findById(id);
-    if (!waybill) return res.status(404).json({ success: false, error: { code: 'VANDON_NOT_FOUND', message: 'Không tìm thấy vận đơn' } });
-
-    if (waybill.trang_thai === 'CANCELLED') {
-      return res.status(422).json({ success: false, error: { code: 'VAN_DON_DA_HUY', message: 'Vận đơn đã bị hủy' } });
-    }
+    // 1. SELECT THÊM CỘT thue_vat_pt TỪ BẢNG bao_gias
+    const [wdRows] = await db.query(`
+      SELECT vd.*, bk.hinh_thuc, bk.so_km_api, bk.loai_xe_id, bg.khach_hang_id, bg.thue_vat_pt, kh.loai_khach
+      FROM van_dons vd
+      JOIN bookings bk ON vd.booking_id = bk.id
+      JOIN bao_gias bg ON bk.bao_gia_id = bg.id
+      JOIN khach_hangs kh ON kh.id = bg.khach_hang_id
+      WHERE vd.ma_van_don = ?
+    `, [id]);
+    
+    if (wdRows.length === 0) return res.status(404).json({ success: false, message: 'Không tìm thấy Vận đơn' });
+    const waybill = wdRows[0];
+    
+    // 🔒 2. KHÓA CHẾT: Không cho sửa nếu Kế toán đã thu tiền (Dù chỉ 1 đồng)
     if (waybill.trang_thai_thanh_toan !== 'UNPAID') {
-      return res.status(422).json({ success: false, error: { code: 'KHONG_THE_SUA_DA_CO_PHIEU_THU', message: 'Không thể sửa vận đơn đã có phiếu thu' } });
+      return res.status(422).json({ success: false, message: 'Vận đơn đã phát sinh giao dịch thu tiền. Hệ thống tự động khóa bảo vệ số liệu!' });
     }
 
-    const [ctRows] = await db.query(
-      `SELECT don_gia_ap_dung FROM bao_gia_chi_tiets WHERE id = ?`,
-      [waybill.bao_gia_chi_tiet_id]
+    // --- [ĐOẠN LOGIC TÍNH TOÁN CƯỚC CHÍNH VÀ PHỤ PHÍ] ---
+    let totalChargeableWeight = 0;
+    const itemUpdates = [];
+    const [origItems] = await db.query(`SELECT id, loai_hang_id, so_luong FROM booking_items WHERE booking_id = ?`, [waybill.booking_id]);
+
+    for (const actItem of kichThuocChot) {
+      const orig = origItems.find(o => Number(o.id) === Number(actItem.booking_item_id));
+      const qty = orig ? orig.so_luong : 1;
+      const lhId = orig ? orig.loai_hang_id : 1;
+
+      let quyDoi = 0;
+      if (actItem.dai_cm && actItem.rong_cm && actItem.cao_cm) {
+        quyDoi = (Number(actItem.dai_cm) * Number(actItem.rong_cm) * Number(actItem.cao_cm)) / 5000 * qty;
+      }
+      const actKg = Number(actItem.trong_luong_thuc_te) || 0;
+      const cw = Math.max(actKg, quyDoi);
+      totalChargeableWeight += cw;
+
+      itemUpdates.push({ id: actItem.booking_item_id, chargeableWeight: cw, loaiHangId: lhId });
+    }
+
+    let tongCuocChinh = 0;
+    if (waybill.hinh_thuc === 'LTL') {
+      const [basePriceRow] = await db.query(`SELECT don_gia_goc_kg, cuoc_toi_thieu FROM bang_gia_ltls WHERE is_active = 1 AND moc_tu_km <= ? AND moc_den_km >= ? LIMIT 1`, [waybill.so_km_api, waybill.so_km_api]);
+      const [discountRow] = await db.query(`SELECT he_so_chiet_khau FROM chiet_khau_san_luong_ltls WHERE moc_tu_kg <= ? AND moc_den_kg >= ? LIMIT 1`, [totalChargeableWeight, totalChargeableWeight]);
+      const donGiaGoc = basePriceRow.length > 0 ? Number(basePriceRow[0].don_gia_goc_kg) : 0;
+      const minCharge = basePriceRow.length > 0 ? Number(basePriceRow[0].cuoc_toi_thieu) : 0;
+      const heSoChietKhau = discountRow.length > 0 ? Number(discountRow[0].he_so_chiet_khau) : 1.0;
+
+      for (const it of itemUpdates) {
+          const [lhRows] = await db.query('SELECT he_so_gia FROM loai_hangs WHERE id = ?', [it.loaiHangId]);
+          const heSoGia = lhRows.length > 0 ? Number(lhRows[0].he_so_gia) : 1.0;
+          tongCuocChinh += donGiaGoc * it.chargeableWeight * heSoGia * heSoChietKhau;
+      }
+      if (tongCuocChinh < minCharge) tongCuocChinh = minCharge;
+    } else if (waybill.hinh_thuc === 'FTL') {
+      const [ftlRows] = await db.query(`SELECT * FROM bang_gia_ftls WHERE loai_xe_id = ? AND is_active = 1 ORDER BY moc_tu_km ASC`, [waybill.loai_xe_id]);
+      let kmToCalc = Number(waybill.so_km_api) || 0;
+      for (const tier of ftlRows) {
+        if (kmToCalc > Number(tier.moc_den_km)) {
+          tongCuocChinh += Number(tier.gia_mo_cua) + ((Number(tier.moc_den_km) - Number(tier.moc_tu_km)) * Number(tier.don_gia_km));
+        } else {
+          const kmVuot = Math.max(0, kmToCalc - Number(tier.moc_tu_km));
+          tongCuocChinh += Number(tier.gia_mo_cua) + (kmVuot * Number(tier.don_gia_km));
+          break;
+        }
+      }
+    }
+
+    let tongPhuPhi = 0;
+    const [phuPhis] = await db.query(`SELECT * FROM booking_phu_phis WHERE booking_id = ?`, [waybill.booking_id]);
+    for (const pp of phuPhis) {
+      const [ppRules] = await db.query('SELECT cach_tinh FROM phu_phis WHERE id = ?', [pp.phu_phi_id]);
+      if (ppRules.length > 0) {
+        const rule = ppRules[0].cach_tinh;
+        if (rule === 'THEO_KG') {
+          const [matrix] = await db.query('SELECT don_gia FROM bang_gia_phu_phis WHERE phu_phi_id = ? LIMIT 1', [pp.phu_phi_id]);
+          if (matrix.length > 0) tongPhuPhi += Number(matrix[0].don_gia) * totalChargeableWeight;
+        } else {
+          tongPhuPhi += Number(pp.so_tien_du_kien);
+        }
+      }
+    }
+
+    // 🚀 ĐÃ FIX: TÍNH THÊM THUẾ VAT VÀO VẬN ĐƠN
+    const tongTruocThue = tongCuocChinh + tongPhuPhi;
+    const thueVatPt = Number(waybill.thue_vat_pt) || 0; // Lấy 8% hoặc 10% từ báo giá gốc
+    const tienThueVat = tongTruocThue * (thueVatPt / 100);
+    const soTienChotCuoi = tongTruocThue + tienThueVat;
+    // --- [KẾT THÚC LOGIC TÍNH CƯỚC] ---
+
+   // 🚀 3. CẬP NHẬT TẤT CẢ VÀO DB
+    await db.query(
+      `UPDATE van_dons 
+       SET trong_luong_chot = ?, kich_thuoc_chot = ?, 
+           tong_cuoc_chinh = ?, tong_phu_phi = ?, so_tien_chot_cuoi = ?,
+           nguoi_gui_ten_thuc_te = COALESCE(?, nguoi_gui_ten_thuc_te), 
+           nguoi_gui_sdt_thuc_te = COALESCE(?, nguoi_gui_sdt_thuc_te),
+           nguoi_nhan_ten_thuc_te = COALESCE(?, nguoi_nhan_ten_thuc_te), 
+           nguoi_nhan_sdt_thuc_te = COALESCE(?, nguoi_nhan_sdt_thuc_te),
+           hinh_thuc_thanh_toan = COALESCE(?, hinh_thuc_thanh_toan), 
+           tien_cod_thu_ho = COALESCE(?, tien_cod_thu_ho)
+       WHERE ma_van_don = ?`,
+      [
+        trongLuongChot || null, JSON.stringify(kichThuocChot) || null, 
+        tongCuocChinh, tongPhuPhi, soTienChotCuoi,
+        nguoi_gui_ten, nguoi_gui_sdt, nguoi_nhan_ten, nguoi_nhan_sdt,
+        hinh_thuc_thanh_toan, tien_cod_thu_ho, id
+      ]
     );
-    const donGia = Number(ctRows[0].don_gia_ap_dung);
-    const giaTriThucTe = Number(trongLuongThucTe) * donGia;
+    
+    // 4. CẬP NHẬT CÔNG NỢ B2B NẾU CÓ CHÊNH LỆCH DO ĐỔI HÌNH THỨC HOẶC KHỐI LƯỢNG
+    const finalHinhThuc = hinh_thuc_thanh_toan || waybill.hinh_thuc_thanh_toan;
+    if (finalHinhThuc === 'GHI_NO') {
+      const chenhLech = soTienChotCuoi - Number(waybill.so_tien_chot_cuoi);
+      await db.query(`UPDATE khach_hangs SET tong_no_hien_tai = tong_no_hien_tai + ? WHERE id = ?`, [chenhLech, waybill.khach_hang_id]);
+    }
 
-    await Waybill.updateWeightWithTransaction(id, trongLuongThucTe, giaTriThucTe);
+    if (typeof sendTelegramMessage === 'function') {
+        sendTelegramMessage(`⚖️ Kho đã cập nhật đơn [${id}]\n- Khối lượng: ${trongLuongChot} kg\n- Thành tiền: ${soTienChotCuoi.toLocaleString()}đ`);
+    }
 
-    res.json({ success: true, message: 'Cập nhật trọng lượng thực tế thành công', data: { giaTriMoi: giaTriThucTe } });
+    res.json({ success: true, message: 'Chốt số liệu và cập nhật thông tin thành công!' });
+  } catch (error) { 
+    res.status(500).json({ success: false, message: error.message }); 
+  }
+};
+
+const exportPdf = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const waybill = await Waybill.getFullDetailsForPdf(id);
+    if (!waybill) return res.status(404).json({ success: false, message: "Lỗi tải dữ liệu Vận đơn" });
+
+    const pdfBuffer = await pdfService.generateWaybillPdf(waybill);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=\"Waybill-${id}.pdf\"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const uploadPod = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!req.file) return res.status(400).json({ success: false, message: 'Vui lòng chọn ảnh Biên nhận (POD)' });
+
+    const uploadDir = path.join(__dirname, '../../public/uploads/pod');
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    
+    const fileName = `POD_${id}_${Date.now()}.jpg`;
+    const filePath = path.join(uploadDir, fileName);
+    fs.writeFileSync(filePath, req.file.buffer);
+
+    const imageUrl = `/uploads/pod/${fileName}`;
+    await db.query(`UPDATE van_dons SET hinh_anh_pod = ?, trang_thai_van_chuyen = 'DA_GIAO' WHERE ma_van_don = ?`, [imageUrl, id]);
+
+    res.json({ success: true, message: 'Tải ảnh POD thành công!', data: { url: imageUrl } });
   } catch (error) {
     res.status(500).json({ success: false, error: { message: error.message } });
   }
@@ -155,18 +261,14 @@ const updateActualWeight = async (req, res) => {
 
 const cancelWaybill = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { lyDoHuy } = req.body;
-
-    const waybill = await Waybill.findById(id);
-    if (!waybill) return res.status(404).json({ success: false, error: { code: 'VANDON_NOT_FOUND', message: 'Không tìm thấy vận đơn' } });
-
-    if (waybill.trang_thai_thanh_toan !== 'UNPAID') {
-      return res.status(422).json({ success: false, error: { code: 'VANDON_DA_THANH_TOAN', message: 'Không thể hủy vận đơn đã có phiếu thu' } });
+    const [wdRows] = await db.query(`SELECT trang_thai_thanh_toan FROM van_dons WHERE ma_van_don = ?`, [req.params.id]);
+    if(wdRows.length === 0) return res.status(404).json({ success: false, message: 'Không tìm thấy Vận đơn' });
+    
+    if(wdRows[0].trang_thai_thanh_toan !== 'UNPAID') {
+       return res.status(422).json({ success: false, message: 'Không thể hủy vận đơn đã thanh toán hoặc thanh toán một phần' });
     }
 
-    await Waybill.cancel(id, lyDoHuy || 'Không có lý do');
-
+    await Waybill.cancel(req.params.id);
     res.json({ success: true, message: 'Đã hủy vận đơn thành công' });
   } catch (error) {
     res.status(500).json({ success: false, error: { message: error.message } });
@@ -175,137 +277,47 @@ const cancelWaybill = async (req, res) => {
 
 const getPendingWaybills = async (req, res) => {
   try {
-    const rows = await Waybill.getPendingBaoGiaChiTiet();
+    const rows = await Waybill.getPendingBookings();
     res.json({ success: true, data: rows });
-  } catch (error) {
-    res.status(500).json({ success: false, error: { message: error.message } });
-  }
-};
-
-// TÍNH NĂNG MỚI: TẠO PDF VẬN ĐƠN (BIÊN BẢN GIAO NHẬN)
-
-
-const exportPdf = async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    const [fullInfo] = await db.query(`
-      SELECT vd.*, kh.ten_cong_ty, kh.nguoi_lien_he, kh.so_dien_thoai, kh.dia_chi, kh.email,
-             td.tinh_di, td.tinh_den, lh.ten as ten_loai_hang, ct.don_gia_ap_dung
-      FROM van_dons vd
-      JOIN bao_gia_chi_tiets ct ON vd.bao_gia_chi_tiet_id = ct.id
-      JOIN bao_gias bg ON ct.bao_gia_id = bg.id
-      JOIN khach_hangs kh ON bg.khach_hang_id = kh.id
-      JOIN tuyen_duongs td ON ct.tuyen_duong_id = td.id
-      JOIN loai_hangs lh ON ct.loai_hang_id = lh.id
-      WHERE vd.id = ?
-    `, [id]);
-
-    if(!fullInfo.length) return res.status(404).json({success: false, message: "Lỗi tải dữ liệu"});
-    const data = fullInfo[0];
-
-    const htmlContent = `
-      <html>
-        <head>
-          <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; line-height: 1.6; color: #333; }
-            .header { text-align: center; border-bottom: 2px solid #722ed1; padding-bottom: 20px; margin-bottom: 30px; }
-            .title { font-size: 28px; font-weight: bold; color: #722ed1; letter-spacing: 1px; }
-            .vd-id { font-size: 16px; color: #555; margin-top: 5px; }
-            .section { margin-bottom: 20px; }
-            .section-title { font-size: 18px; font-weight: bold; border-bottom: 1px dashed #ccc; padding-bottom: 5px; margin-bottom: 10px; color: #1890ff; }
-            .row { display: flex; justify-content: space-between; margin-bottom: 8px; }
-            .col { flex: 1; }
-            .label { font-weight: bold; color: #555; display: inline-block; width: 140px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #dee2e6; padding: 12px; text-align: left; }
-            th { background-color: #f0f5ff; color: #1890ff; }
-            .footer { margin-top: 50px; display: flex; justify-content: space-around; text-align: center; }
-            .sign-box { width: 30%; }
-            .sign-title { font-weight: bold; margin-bottom: 60px; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="title">BIÊN BẢN GIAO NHẬN / VẬN ĐƠN</div>
-            <div class="vd-id">Mã số: <strong>${data.id}</strong> | Ngày tạo: ${new Date(data.ngay_tao).toLocaleDateString('vi-VN')}</div>
-          </div>
-          <div class="section">
-            <div class="section-title">1. Thông tin Khách hàng</div>
-            <div class="row">
-              <div class="col"><span class="label">Khách hàng:</span> ${data.ten_cong_ty}</div>
-            </div>
-            <div class="row">
-              <div class="col"><span class="label">Đại diện:</span> ${data.nguoi_lien_he}</div>
-              <div class="col"><span class="label">Điện thoại:</span> ${data.so_dien_thoai}</div>
-            </div>
-          </div>
-          <div class="section">
-            <div class="section-title">2. Lịch trình & Hàng hóa</div>
-            <div class="row">
-              <div class="col"><span class="label">Tuyến đường:</span> <strong>${data.tinh_di} ➔ ${data.tinh_den}</strong></div>
-              <div class="col"><span class="label">Loại hàng:</span> ${data.ten_loai_hang}</div>
-            </div>
-            <div class="row">
-              <div class="col"><span class="label">Bốc hàng (Lấy):</span> ${data.nguoi_lien_he_lay}</div>
-            </div>
-            <div class="row">
-              <div class="col"><span class="label">Nhận hàng (Giao):</span> ${data.nguoi_lien_he_giao}</div>
-            </div>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Trọng lượng dự kiến</th><th>Trọng lượng thực tế</th><th>Tổng cước phí</th><th>Hạn thanh toán</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>${Number(data.trong_luong_du_kien).toLocaleString('vi-VN')} kg</td>
-                <td><strong style="color: #1890ff">${data.trong_luong_thuc_te ? Number(data.trong_luong_thuc_te).toLocaleString('vi-VN') + ' kg' : 'Chưa cập nhật'}</strong></td>
-                <td style="color: #cf1322; font-weight: bold;">${Number(data.gia_tri).toLocaleString('vi-VN')} VNĐ</td>
-                <td><strong>${new Date(data.ngay_het_han_thanh_toan).toLocaleDateString('vi-VN')}</strong></td>
-              </tr>
-            </tbody>
-          </table>
-          <div class="footer">
-            <div class="sign-box"><div class="sign-title">Đại diện Giao hàng</div><div>(Ký tên)</div></div>
-            <div class="sign-box"><div class="sign-title">Tài xế tiếp nhận</div><div>(Ký tên)</div></div>
-            <div class="sign-box"><div class="sign-title">Đại diện Nhận hàng</div><div>(Ký tên)</div></div>
-          </div>
-        </body>
-      </html>
-    `;
-
-    const browser = await puppeteer.launch({ headless: "new" });
-    const page = await browser.newPage();
-    await page.setContent(htmlContent);
-    const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true });
-    await browser.close();
-
-    // 🚀 TỰ ĐỘNG GỬI MAIL KHI XUẤT PDF
-    if (data.email) {
-      sendWaybillEmail(data.email, data.ten_cong_ty, id, pdfBuffer)
-        .catch(err => console.error("Lỗi gửi mail vận đơn:", err));
-    }
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="VanDon-${id}.pdf"`);
-    res.send(pdfBuffer);
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
- 
+// 🚀 BỔ SUNG: Hàm xử lý API Gửi Email Vận Đơn cho khách
+const sendWaybillEmailController = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Truy vấn DB lấy Email và Tên khách hàng của Vận đơn này
+    const [khRows] = await db.query(`
+      SELECT kh.email, kh.ten_cong_ty 
+      FROM van_dons vd
+      JOIN bookings bk ON vd.booking_id = bk.id
+      JOIN bao_gias bg ON bk.bao_gia_id = bg.id
+      JOIN khach_hangs kh ON bg.khach_hang_id = kh.id
+      WHERE vd.ma_van_don = ?
+    `, [id]);
+
+    if (khRows.length === 0 || !khRows[0].email) {
+      return res.status(404).json({ success: false, message: 'Khách hàng này chưa có địa chỉ Email trong hệ thống!' });
+    }
+
+    // 2. Tạo ngầm file PDF Vận đơn
+    const waybill = await Waybill.getFullDetailsForPdf(id);
+    if (!waybill) return res.status(404).json({ success: false, message: 'Không thể tạo PDF vì thiếu dữ liệu Vận đơn' });
+    const pdfBuffer = await pdfService.generateWaybillPdf(waybill);
+
+    // 3. Gọi hàm sendWaybillEmail từ emailService (Bạn đã import ở đầu file rồi)
+    await sendWaybillEmail(khRows[0].email, khRows[0].ten_cong_ty, id, pdfBuffer);
+
+    res.json({ success: true, message: 'Đã gửi Email đính kèm Vận đơn thành công!' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Lỗi khi gửi email: ' + error.message });
+  }
+};
 
 module.exports = { 
-  getWaybills, 
-  getWaybillById, 
-  getConfirmedWaybills, 
-  createWaybill, 
-  updateActualWeight, 
-  cancelWaybill,
-  getPendingWaybills,
-  exportPdf // XUẤT RA ROUTER SỬ DỤNG
+  getWaybills, getWaybillById, createFromQuotation, createDirectly, 
+  finalizeNumbers, uploadPod, cancelWaybill, getPendingWaybills, exportPdf ,sendWaybillEmailController
 };

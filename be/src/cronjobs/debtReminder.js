@@ -1,43 +1,43 @@
+// src/cronjobs/debtReminder.js
 const cron = require('node-cron');
-const db = require('../config/database'); // Điều chỉnh lại đường dẫn file kết nối DB của bạn
+const CongNo = require('../models/congNoModel');
 const { sendDebtReminderEmail } = require('../services/emailService');
 
-// Cài đặt lịch: Chạy vào đúng 08:00 Sáng mỗi ngày
-// Cú pháp: Giây(tùy chọn) | Phút | Giờ | Ngày trong tháng | Tháng | Ngày trong tuần
+// 🚀 Chạy vào 08:00 sáng MỖI NGÀY, nhưng chỉ kích hoạt gửi mail nếu hôm đó là NGÀY CUỐI THÁNG
 cron.schedule('0 8 * * *', async () => {
-  console.log('⏰ [CRON] Bắt đầu quét công nợ quá hạn lúc 08:00 AM...');
-
-  try {
-    // Tìm các vận đơn chưa thanh toán, và ngày hết hạn trễ đúng 3 ngày hoặc 7 ngày
-    // DATEDIFF(CURDATE(), ngay_het_han_thanh_toan) = Tính số ngày quá hạn
-    const [overdueWaybills] = await db.query(`
-      SELECT vd.id, vd.ngay_het_han_thanh_toan, vd.gia_tri, 
-             bg.khach_hang_id, kh.ten_cong_ty, kh.email,
-             DATEDIFF(CURDATE(), vd.ngay_het_han_thanh_toan) as so_ngay_qua_han
-      FROM van_dons vd
-      JOIN bao_gia_chi_tiets ct ON vd.bao_gia_chi_tiet_id = ct.id
-      JOIN bao_gias bg ON ct.bao_gia_id = bg.id
-      JOIN khach_hangs kh ON bg.khach_hang_id = kh.id
-      WHERE vd.trang_thai_thanh_toan != 'PAID'
-        AND DATEDIFF(CURDATE(), vd.ngay_het_han_thanh_toan) IN (3, 7)
-    `);
-
-    if (overdueWaybills.length === 0) {
-      console.log('✅ Không có khách hàng nào tới mốc quá hạn 3 ngày hoặc 7 ngày hôm nay.');
-      return;
-    }
-
-    // Gửi mail cho từng khách
-    for (const item of overdueWaybills) {
-      if (item.email) {
-        await sendDebtReminderEmail(item.email, item.ten_cong_ty, item.gia_tri, item.so_ngay_qua_han);
-        console.log(`📧 Đã gửi nhắc nợ cho: ${item.ten_cong_ty} (Quá hạn ${item.so_ngay_qua_han} ngày)`);
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  
+  // Logic: Nếu ngày mai là mùng 1 -> Hôm nay chính xác là ngày cuối tháng
+  if (tomorrow.getDate() === 1) {
+    console.log(`⏰ [CRON] ${today.toLocaleDateString()}: Bắt đầu quét và gửi email nhắc nợ cuối tháng...`);
+    
+    try {
+      // Gọi thẳng hàm lấy danh sách nợ từ Model Công Nợ đã nâng cấp
+      const khachHangNoList = await CongNo.getDanhSachKhachNoEmail();
+      
+      if (khachHangNoList.length === 0) {
+        console.log('✅ Không có khách hàng nào đang nợ để gửi nhắc nhở.');
+        return;
       }
-    }
 
-  } catch (error) {
-    console.error('❌ Lỗi khi chạy Cron Nhắc nợ:', error);
+      for (const kh of khachHangNoList) {
+        try {
+          // Gửi mail với số nợ hiện tại. Hạn thanh toán mặc định là cuối tháng.
+          await sendDebtReminderEmail(kh.email, kh.ten_cong_ty, kh.tong_no_hien_tai, kh.soNgayQuaHan);
+          console.log(`📧 Đã gửi nhắc nợ tự động cho: ${kh.email}`);
+        } catch (e) {
+          console.error(`❌ Lỗi gửi mail cho ${kh.email}:`, e.message);
+        }
+        // Delay nhẹ 2s giữa các mail để Google không khóa tài khoản vì nghi Spam
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      console.log('✅ [CRON] Hoàn tất quá trình gửi mail nhắc nợ cuối tháng!');
+    } catch (error) {
+      console.error('❌ Lỗi hệ thống khi quét nợ:', error);
+    }
+  } else {
+    // console.log(`Hôm nay chưa phải cuối tháng. Bỏ qua.`);
   }
 });
-
-console.log('⏳ Tiến trình Nhắc nợ tự động đã được kích hoạt!');

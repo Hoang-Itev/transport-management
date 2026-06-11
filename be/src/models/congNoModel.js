@@ -1,220 +1,129 @@
+// src/models/congNoModel.js
 const db = require('../config/database');
 
+
 const CongNo = {
-  // GET /cong-no — danh sách tổng hợp
-  // FIX 1: Thêm tham số 'search' vào hàm nhận
-  findAll: async ({ page = 1, limit = 20, quaHan, nguoiTaoId, search }) => {
+  findAll: async ({ page = 1, limit = 20, search, quaHan }) => {
     const offset = (page - 1) * limit;
-
-    let baseQuery = `
-      FROM khach_hangs kh
-      WHERE kh.is_active = TRUE
-    `;
+    let baseQuery = `FROM khach_hangs WHERE loai_khach = 'B2B_DOANH_NGHIEP' AND is_active = 1`;
     const params = [];
+    
+    if (search) { baseQuery += ` AND ten_cong_ty LIKE ?`; params.push(`%${search}%`); }
 
-    // FIX 2: Bổ sung logic lọc theo Tên công ty nếu có search
-    if (search) {
-      baseQuery += ` AND kh.ten_cong_ty LIKE ? `;
-      params.push(`%${search}%`);
-    }
-
-    if (nguoiTaoId) {
-      baseQuery += `
-        AND EXISTS (
-          SELECT 1 FROM bao_gias bg
-          WHERE bg.khach_hang_id = kh.id
-          AND bg.nguoi_tao_id = ?
-        )
-      `;
-      params.push(nguoiTaoId);
-    }
-
-    // Đẩy điều kiện lọc quá hạn vào thẳng SQL
     if (quaHan === 'true' || quaHan === true) {
-      baseQuery += `
-        AND EXISTS (
-          SELECT 1 FROM van_dons vd
-          JOIN bao_gia_chi_tiets ct ON vd.bao_gia_chi_tiet_id = ct.id
-          JOIN bao_gias bg ON ct.bao_gia_id = bg.id
-          WHERE bg.khach_hang_id = kh.id
-            AND vd.trang_thai = 'CONFIRMED'
-            AND vd.trang_thai_thanh_toan != 'PAID'
-            AND vd.ngay_het_han_thanh_toan < CURDATE()
-        )
-      `;
+      baseQuery += ` AND EXISTS(
+        SELECT 1 FROM van_dons vd JOIN bookings bk ON vd.booking_id = bk.id JOIN bao_gias bg ON bk.bao_gia_id = bg.id 
+        WHERE bg.khach_hang_id = khach_hangs.id AND vd.hinh_thuc_thanh_toan = 'GHI_NO' AND vd.trang_thai_van_chuyen != 'CANCELLED' 
+        AND vd.trang_thai_thanh_toan != 'PAID' AND DATE_ADD(vd.ngay_tao, INTERVAL 30 DAY) < NOW()
+      )`;
     }
 
     const selectQuery = `
-      SELECT
-        kh.id            AS khachHangId,
-        kh.ten_cong_ty   AS tenCongTy,
-        kh.han_muc_cong_no AS hanMucCongNo,
-        COALESCE((
-          SELECT SUM(vd.gia_tri - COALESCE(
-            (SELECT SUM(so_tien_phan_bo) FROM phieu_thu_chi_tiets ptct WHERE ptct.van_don_id = vd.id), 0
-          ))
-          FROM van_dons vd
-          JOIN bao_gia_chi_tiets ct ON vd.bao_gia_chi_tiet_id = ct.id
-          JOIN bao_gias bg ON ct.bao_gia_id = bg.id
-          WHERE bg.khach_hang_id = kh.id
-            AND vd.trang_thai = 'CONFIRMED'
-            AND vd.trang_thai_thanh_toan != 'PAID'
-        ), 0) AS congNoHienTai,
-        COALESCE((
-          SELECT COUNT(*)
-          FROM van_dons vd
-          JOIN bao_gia_chi_tiets ct ON vd.bao_gia_chi_tiet_id = ct.id
-          JOIN bao_gias bg ON ct.bao_gia_id = bg.id
-          WHERE bg.khach_hang_id = kh.id
-            AND vd.trang_thai = 'CONFIRMED'
-            AND vd.trang_thai_thanh_toan != 'PAID'
-        ), 0) AS soVanDonChuaTT,
-        COALESCE((
-          SELECT 1 FROM van_dons vd
-          JOIN bao_gia_chi_tiets ct ON vd.bao_gia_chi_tiet_id = ct.id
-          JOIN bao_gias bg ON ct.bao_gia_id = bg.id
-          WHERE bg.khach_hang_id = kh.id
-            AND vd.trang_thai = 'CONFIRMED'
-            AND vd.trang_thai_thanh_toan != 'PAID'
-            AND vd.ngay_het_han_thanh_toan < CURDATE()
-          LIMIT 1
-        ), 0) AS isQuaHan
-      ${baseQuery}
-      ORDER BY congNoHienTai DESC
-      LIMIT ? OFFSET ?
-    `;
-    
+      SELECT id as khachHangId, ten_cong_ty as tenCongTy, han_muc_no_toi_da as hanMucCongNo, tong_no_hien_tai as congNoHienTai, (han_muc_no_toi_da - tong_no_hien_tai) as conLaiDuocPhepNo,
+      (SELECT COUNT(*) FROM van_dons vd JOIN bookings bk ON vd.booking_id = bk.id JOIN bao_gias bg ON bk.bao_gia_id = bg.id WHERE bg.khach_hang_id = khach_hangs.id AND vd.hinh_thuc_thanh_toan = 'GHI_NO' AND vd.trang_thai_van_chuyen != 'CANCELLED' AND vd.trang_thai_thanh_toan != 'PAID') as soVanDonChuaTT,
+      EXISTS(SELECT 1 FROM van_dons vd JOIN bookings bk ON vd.booking_id = bk.id JOIN bao_gias bg ON bk.bao_gia_id = bg.id WHERE bg.khach_hang_id = khach_hangs.id AND vd.hinh_thuc_thanh_toan = 'GHI_NO' AND vd.trang_thai_van_chuyen != 'CANCELLED' AND vd.trang_thai_thanh_toan != 'PAID' AND DATE_ADD(vd.ngay_tao, INTERVAL 30 DAY) < NOW()) as isQuaHan
+      ${baseQuery} ORDER BY tong_no_hien_tai DESC LIMIT ? OFFSET ?`;
+      
     const countQuery = `SELECT COUNT(*) as total ${baseQuery}`;
-
+    
+    // 🚀 ĐÃ FIX: Tính tổng nợ toàn cục (Bỏ qua Limit/Offset) để trang Công nợ hiển thị đúng
+    const sumDebtQuery = `SELECT COALESCE(SUM(tong_no_hien_tai), 0) as globalTotalDebt ${baseQuery}`;
+    
     const [rows] = await db.query(selectQuery, [...params, Number(limit), Number(offset)]);
     const [count] = await db.query(countQuery, params);
-
-    const data = rows.map(row => {
-      const congNoHienTai = Number(row.congNoHienTai);
-      const hanMucCongNo = Number(row.hanMucCongNo);
-      return {
-        khachHangId:      row.khachHangId,
-        tenCongTy:        row.tenCongTy,
-        hanMucCongNo,
-        congNoHienTai,
-        conLaiDuocPhepNo: hanMucCongNo - congNoHienTai,
-        soVanDonChuaTT:   Number(row.soVanDonChuaTT),
-        isQuaHan:         row.isQuaHan === 1 
-      };
-    });
-
-    return {
-      data,
-      pagination: {
-        total: count[0].total,
-        page:  Number(page),
-        limit: Number(limit)
-      }
+    const [sumDebt] = await db.query(sumDebtQuery, params);
+    
+    return { 
+      data: rows, 
+      pagination: { total: count[0].total, page: Number(page), limit: Number(limit) },
+      globalTotalDebt: Number(sumDebt[0].globalTotalDebt) // Trả về FE để hiển thị
     };
   },
 
-  // GET /cong-no/:khachHangId — chi tiết 1 khách
+  // 🚀 HÀM MỚI: Lấy danh sách toàn bộ khách hàng đang có nợ để gửi Mail hàng loạt
+  getDanhSachKhachNoEmail: async () => {
+    const [rows] = await db.query(`
+      SELECT id, ten_cong_ty, email, tong_no_hien_tai 
+      FROM khach_hangs 
+      WHERE loai_khach = 'B2B_DOANH_NGHIEP' AND is_active = 1 AND tong_no_hien_tai > 0 AND email IS NOT NULL AND email != ''
+    `);
+    
+    for (let i = 0; i < rows.length; i++) {
+        // Lấy ngày của đơn nợ cũ nhất để tính số ngày quá hạn (Nếu > 30 ngày)
+        const [oldest] = await db.query(`
+            SELECT DATEDIFF(NOW(), DATE_ADD(MIN(vd.ngay_tao), INTERVAL 30 DAY)) AS soNgayQuaHan
+            FROM van_dons vd JOIN bookings bk ON vd.booking_id = bk.id JOIN bao_gias bg ON bk.bao_gia_id = bg.id
+            WHERE bg.khach_hang_id = ? AND vd.hinh_thuc_thanh_toan = 'GHI_NO' AND vd.trang_thai_van_chuyen != 'CANCELLED' AND vd.trang_thai_thanh_toan != 'PAID'
+        `, [rows[i].id]);
+        
+        rows[i].soNgayQuaHan = oldest[0]?.soNgayQuaHan > 0 ? oldest[0].soNgayQuaHan : 0;
+    }
+    return rows;
+  },
+  
+
   findByKhachHangId: async (khachHangId) => {
-    const [khRows] = await db.query(
-      `SELECT id, ten_cong_ty, han_muc_cong_no FROM khach_hangs WHERE id = ?`,
-      [khachHangId]
-    );
+    // ... [Mã gốc hàm này giữ nguyên] ...
+    const [khRows] = await db.query(`SELECT id, ten_cong_ty, han_muc_no_toi_da, tong_no_hien_tai FROM khach_hangs WHERE id = ?`, [khachHangId]);
     if (!khRows.length) return null;
     const kh = khRows[0];
 
-    const today = new Date().toISOString().split('T')[0];
-
-    // Vận đơn quá hạn
-    const [vanDonQuaHan] = await db.query(
-      `SELECT
-        vd.id                        AS vanDonId,
-        vd.gia_tri                   AS giaTri,
-        vd.ngay_het_han_thanh_toan   AS ngayHetHanThanhToan,
-        COALESCE((SELECT SUM(so_tien_phan_bo) FROM phieu_thu_chi_tiets WHERE van_don_id = vd.id), 0) AS daThu,
-        DATEDIFF(NOW(), vd.ngay_het_han_thanh_toan) AS soNgayQuaHan
-       FROM van_dons vd
-       JOIN bao_gia_chi_tiets ct ON vd.bao_gia_chi_tiet_id = ct.id
-       JOIN bao_gias bg ON ct.bao_gia_id = bg.id
-       WHERE bg.khach_hang_id = ?
-         AND vd.trang_thai = 'CONFIRMED'
-         AND vd.trang_thai_thanh_toan != 'PAID'
-         AND vd.ngay_het_han_thanh_toan < ?`,
-      [khachHangId, today]
-    );
-
-    // Vận đơn chưa thanh toán (trong hạn)
     const [vanDonChuaTT] = await db.query(
       `SELECT
-        vd.id                        AS vanDonId,
-        vd.gia_tri                   AS giaTri,
-        vd.ngay_het_han_thanh_toan   AS ngayHetHanThanhToan,
-        COALESCE((SELECT SUM(so_tien_phan_bo) FROM phieu_thu_chi_tiets WHERE van_don_id = vd.id), 0) AS daThu
+        vd.ma_van_don                AS vanDonId,
+        vd.so_tien_chot_cuoi         AS giaTri,
+        DATE_ADD(vd.ngay_tao, INTERVAL 30 DAY) AS ngayHetHanThanhToan,
+        DATEDIFF(NOW(), DATE_ADD(vd.ngay_tao, INTERVAL 30 DAY)) AS soNgayQuaHan,
+        COALESCE((SELECT SUM(so_tien_phan_bo) FROM phieu_thu_chi_tiets WHERE van_don_id = vd.ma_van_don), 0) AS daThu
        FROM van_dons vd
-       JOIN bao_gia_chi_tiets ct ON vd.bao_gia_chi_tiet_id = ct.id
-       JOIN bao_gias bg ON ct.bao_gia_id = bg.id
+       JOIN bookings bk ON vd.booking_id = bk.id
+       JOIN bao_gias bg ON bk.bao_gia_id = bg.id
        WHERE bg.khach_hang_id = ?
-         AND vd.trang_thai = 'CONFIRMED'
+         AND vd.hinh_thuc_thanh_toan = 'GHI_NO'
+         AND vd.trang_thai_van_chuyen != 'CANCELLED'
          AND vd.trang_thai_thanh_toan != 'PAID'
-         AND vd.ngay_het_han_thanh_toan >= ?`,
-      [khachHangId, today]
-    );
-
-    const [lichSu] = await db.query(
-      `SELECT
-        pt.id         AS maPhieuThu,
-        pt.ngay_thu   AS ngayThu,
-        pt.hinh_thuc  AS hinhThuc,
-        ptct.so_tien_phan_bo AS soTienPhanBo
-       FROM phieu_thus pt
-       JOIN phieu_thu_chi_tiets ptct ON pt.id = ptct.phieu_thu_id
-       WHERE pt.khach_hang_id = ?
-       ORDER BY pt.ngay_thu DESC`,
+       ORDER BY vd.ngay_tao ASC`,
       [khachHangId]
     );
 
-    const formatVanDon = (vd) => ({
-      vanDonId:             vd.vanDonId,
-      giaTri:               Number(vd.giaTri),
-      conLai:               Number(vd.giaTri) - Number(vd.daThu),
-      ngayHetHanThanhToan:  vd.ngayHetHanThanhToan,
-      ...(vd.soNgayQuaHan !== undefined && { soNgayQuaHan: Number(vd.soNgayQuaHan) })
-    });
-
-    const congNoHienTai = [
-      ...vanDonQuaHan.map(formatVanDon),
-      ...vanDonChuaTT.map(formatVanDon)
-    ].reduce((sum, vd) => sum + vd.conLai, 0);
-
-    const hanMucCongNo = Number(kh.han_muc_cong_no);
+    const [lichSu] = await db.query(
+      `SELECT pt.id AS maPhieuThu, pt.ngay_thu AS ngayThu, pt.hinh_thuc AS hinhThuc, ptct.so_tien_phan_bo AS soTienPhanBo
+       FROM phieu_thus pt
+       JOIN phieu_thu_chi_tiets ptct ON pt.id = ptct.phieu_thu_id
+       WHERE pt.khach_hang_id = ? ORDER BY pt.ngay_thu DESC`,
+      [khachHangId]
+    );
 
     return {
-      khachHangId:      Number(kh.id),
-      tenCongTy:        kh.ten_cong_ty,
-      hanMucCongNo,
-      congNoHienTai,
-      conLaiDuocPhepNo: hanMucCongNo - congNoHienTai,
-      vanDonQuaHan:     vanDonQuaHan.map(formatVanDon),
-      vanDonChuaTT:     vanDonChuaTT.map(formatVanDon),
-      lichSuThanhToan:  lichSu.map(ls => ({
-        maPhieuThu:    ls.maPhieuThu,
-        ngayThu:       ls.ngayThu,
-        soTienPhanBo:  Number(ls.soTienPhanBo),
-        hinhThuc:      ls.hinhThuc
+      khachHangId: Number(kh.id), tenCongTy: kh.ten_cong_ty, hanMucCongNo: Number(kh.han_muc_no_toi_da), congNoHienTai: Number(kh.tong_no_hien_tai),
+      conLaiDuocPhepNo: Number(kh.han_muc_no_toi_da) - Number(kh.tong_no_hien_tai),
+      vanDonChuaTT: vanDonChuaTT.map(vd => ({
+        vanDonId: vd.vanDonId, giaTri: Number(vd.giaTri), daThu: Number(vd.daThu),
+        conLai: Number(vd.giaTri) - Number(vd.daThu), ngayHetHanThanhToan: vd.ngayHetHanThanhToan, soNgayQuaHan: Number(vd.soNgayQuaHan) 
+      })),
+      lichSuThanhToan: lichSu.map(ls => ({
+        maPhieuThu: ls.maPhieuThu, ngayThu: ls.ngayThu, soTienPhanBo: Number(ls.soTienPhanBo), hinhThuc: ls.hinhThuc
       }))
     };
   },
 
-  // GET /xuat-bao-cao — data để xuất báo cáo
-  baoCaoCongNo: async ({ thang, nam }) => {
+  // 🚀 FIX LỖI XUẤT EXCEL: Nhận trực tiếp bộ lọc từ Frontend để xuất dữ liệu chính xác
+  baoCaoCongNo: async ({ search, quaHan }) => {
     const params = [];
     let whereClause = `
-      WHERE vd.trang_thai = 'CONFIRMED'
+      WHERE vd.trang_thai_van_chuyen != 'CANCELLED'
+        AND vd.hinh_thuc_thanh_toan = 'GHI_NO'
         AND vd.trang_thai_thanh_toan != 'PAID'
+        AND kh.loai_khach = 'B2B_DOANH_NGHIEP'
     `;
 
-    if (thang && nam) {
-      whereClause += ` AND MONTH(vd.ngay_tao) = ? AND YEAR(vd.ngay_tao) = ?`;
-      params.push(Number(thang), Number(nam));
+    if (search) {
+      whereClause += ` AND kh.ten_cong_ty LIKE ?`;
+      params.push(`%${search}%`);
+    }
+
+    if (quaHan === 'true' || quaHan === true) {
+      whereClause += ` AND DATE_ADD(vd.ngay_tao, INTERVAL 30 DAY) < NOW()`;
     }
 
     const [rows] = await db.query(
@@ -222,33 +131,25 @@ const CongNo = {
         kh.ten_cong_ty            AS tenCongTy,
         kh.nguoi_lien_he          AS nguoiLienHe,
         kh.so_dien_thoai          AS soDienThoai,
-        vd.id                     AS vanDonId,
-        vd.gia_tri                AS giaTri,
-        vd.ngay_het_han_thanh_toan AS ngayHetHan,
-        COALESCE(SUM(ptct.so_tien_phan_bo), 0) AS daThu,
-        DATEDIFF(NOW(), vd.ngay_het_han_thanh_toan) AS soNgayQuaHan
+        vd.ma_van_don             AS vanDonId,
+        vd.so_tien_chot_cuoi      AS giaTri,
+        DATE_ADD(vd.ngay_tao, INTERVAL 30 DAY) AS ngayHetHan,
+        COALESCE((SELECT SUM(so_tien_phan_bo) FROM phieu_thu_chi_tiets WHERE van_don_id = vd.ma_van_don), 0) AS daThu,
+        DATEDIFF(NOW(), DATE_ADD(vd.ngay_tao, INTERVAL 30 DAY)) AS soNgayQuaHan
        FROM van_dons vd
-       JOIN bao_gia_chi_tiets ct ON vd.bao_gia_chi_tiet_id = ct.id
-       JOIN bao_gias bg ON ct.bao_gia_id = bg.id
+       JOIN bookings bk ON vd.booking_id = bk.id
+       JOIN bao_gias bg ON bk.bao_gia_id = bg.id
        JOIN khach_hangs kh ON bg.khach_hang_id = kh.id
-       LEFT JOIN phieu_thu_chi_tiets ptct ON vd.id = ptct.van_don_id
        ${whereClause}
-       GROUP BY vd.id
-       ORDER BY kh.ten_cong_ty, vd.ngay_het_han_thanh_toan`,
+       ORDER BY kh.ten_cong_ty, ngayHetHan`,
       params
     );
 
     return rows.map(r => ({
-      tenCongTy:    r.tenCongTy,
-      nguoiLienHe:  r.nguoiLienHe,
-      soDienThoai:  r.soDienThoai,
-      vanDonId:     r.vanDonId,
-      giaTri:       Number(r.giaTri),
-      daThu:        Number(r.daThu),
-      conLai:       Number(r.giaTri) - Number(r.daThu),
-      ngayHetHan:   r.ngayHetHan,
-      soNgayQuaHan: Number(r.soNgayQuaHan),
-      isQuaHan:     Number(r.soNgayQuaHan) > 0
+      tenCongTy: r.tenCongTy, nguoiLienHe: r.nguoiLienHe, soDienThoai: r.soDienThoai,
+      vanDonId: r.vanDonId, giaTri: Number(r.giaTri), daThu: Number(r.daThu),
+      conLai: Number(r.giaTri) - Number(r.daThu), ngayHetHan: r.ngayHetHan,
+      soNgayQuaHan: Number(r.soNgayQuaHan), isQuaHan: Number(r.soNgayQuaHan) > 0
     }));
   }
 };

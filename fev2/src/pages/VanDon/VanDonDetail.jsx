@@ -1,197 +1,282 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Row, Col, Space, Typography, message, Modal, Form, Input, InputNumber, Divider, Spin, Table } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, CloseOutlined, PrinterOutlined } from '@ant-design/icons';
+import { Card, Form, Select, Button, Row, Col, Space, Typography, message, Modal, InputNumber, Input, Divider, Spin, Table, Tag, Alert, AutoComplete } from 'antd';
+import { ArrowLeftOutlined, SaveOutlined, CloseOutlined, PrinterOutlined, EnvironmentOutlined, MailOutlined, MessageOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
+import axios from 'axios';
 
 import { vanDonService } from '../../services/vanDonService';
 import StatusTag from '../../components/common/StatusTag';
 import CurrencyText from '../../components/common/CurrencyText';
 import { formatDate } from '../../utils/formatDate';
+import GoongMapRoute from '../../components/common/GoongMapRoute';
 
 const { Title, Text } = Typography;
+const { Option } = Select;
+const REST_KEY = import.meta.env.VITE_GOONG_REST_KEY;
 
 const VanDonDetail = () => {
   const navigate = useNavigate();
   const { id } = useParams();
 
   const [loading, setLoading] = useState(true);
+  const [savingActuals, setSavingActuals] = useState(false);
   const [data, setData] = useState(null);
+  
+  const [routeStatus, setRouteStatus] = useState('');
+  const [actualsForm] = Form.useForm();
 
-  // Modal State
-  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
-  const [isCancelModalVisible, setIsCancelModalVisible] = useState(false);
-  const [editForm] = Form.useForm();
-  const [cancelForm] = Form.useForm();
+  // 🚀 State quản lý Địa chỉ & Khoảng cách động
+  const [diemLay, setDiemLay] = useState('');
+  const [diemGiao, setDiemGiao] = useState('');
+  const [khoangCach, setKhoangCach] = useState(0);
+
+  // 🚀 State gợi ý Autocomplete
+  const [optionsLay, setOptionsLay] = useState([]);
+  const [optionsGiao, setOptionsGiao] = useState([]);
 
   const loadDetail = async () => {
+    setLoading(true);
     try {
       const res = await vanDonService.getById(id);
-      if (res.success) {
-        setData(res.data);
+      if (res.success && res.data) {
+        const d = res.data;
+        setData(d);
+        setRouteStatus(d.trang_thai_van_chuyen);
+        setDiemLay(d.diem_lay_chi_tiet);
+        setDiemGiao(d.diem_giao_chi_tiet);
+        setKhoangCach(d.so_km_api);
+
+        const savedActuals = d.kich_thuoc_chot ? (typeof d.kich_thuoc_chot === 'string' ? JSON.parse(d.kich_thuoc_chot) : d.kich_thuoc_chot) : null;
+        const itemActualsMap = {};
+        (d.items || []).forEach(item => {
+          const saved = Array.isArray(savedActuals) ? savedActuals.find(s => String(s.booking_item_id) === String(item.id)) : null;
+          itemActualsMap[item.id] = {
+            trong_luong_thuc_te: saved?.trong_luong_thuc_te ?? item.trong_luong_thuc_te,
+            dai_cm: saved?.dai_cm ?? item.thuoc_tinh_chi_tiet?.dai_cm ?? null,
+            rong_cm: saved?.rong_cm ?? item.thuoc_tinh_chi_tiet?.rong_cm ?? null,
+            cao_cm: saved?.cao_cm ?? item.thuoc_tinh_chi_tiet?.cao_cm ?? null,
+            nhiet_do_c: saved?.nhiet_do_c ?? item.thuoc_tinh_chi_tiet?.nhiet_do_c ?? null,
+          };
+        });
+
+        actualsForm.setFieldsValue({ 
+          nguoi_gui_ten: d.nguoi_gui_ten_thuc_te, nguoi_gui_sdt: d.nguoi_gui_sdt_thuc_te,
+          nguoi_nhan_ten: d.nguoi_nhan_ten_thuc_te, nguoi_nhan_sdt: d.nguoi_nhan_sdt_thuc_te,
+          diem_lay_chi_tiet: d.diem_lay_chi_tiet, diem_giao_chi_tiet: d.diem_giao_chi_tiet,
+          hinh_thuc_thanh_toan: d.hinh_thuc_thanh_toan, tien_cod_thu_ho: d.tien_cod_thu_ho,
+          item_actuals: itemActualsMap 
+        });
       }
-    } catch (error) {
-      message.error('Không tải được thông tin vận đơn');
+    } catch {
+      message.error('Không tải được thông tin');
       navigate('/van-don');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   useEffect(() => { loadDetail(); }, [id]);
 
-  // 🚀 FIX: Gọi API Cập nhật chung
-  const handleUpdate = async (values) => {
+  // 🚀 Hàm tìm kiếm địa chỉ Goong Autocomplete
+  const handleSearchAddress = async (value, type) => {
+    if (!value) return;
     try {
-      await vanDonService.update(id, values);
-      message.success('Cập nhật thông tin thành công');
-      setIsEditModalVisible(false);
-      loadDetail(); // Reload data
-    } catch (error) { message.error(error?.error?.message || 'Lỗi cập nhật'); }
+      const res = await axios.get(`https://rsapi.goong.io/Place/AutoComplete?api_key=${REST_KEY}&input=${encodeURIComponent(value)}`);
+      if (res.data.predictions) {
+        const opts = res.data.predictions.map(p => ({ value: p.description }));
+        if (type === 'origin') setOptionsLay(opts);
+        else setOptionsGiao(opts);
+      }
+    } catch (error) { console.error("Lỗi Goong Autocomplete", error); }
   };
 
-  const handleCancel = async (values) => {
+  const handleUpdateStatus = async () => {
     try {
-      await vanDonService.huyVanDon(id, values.lyDoHuy);
-      message.success('Đã hủy vận đơn');
-      setIsCancelModalVisible(false);
+      await vanDonService.updateStatus(id, routeStatus);
+      message.success('Cập nhật lộ trình thành công');
       loadDetail();
-    } catch (error) { message.error(error?.error?.message || 'Không thể hủy vận đơn này'); }
+    } catch { message.error('Lỗi cập nhật trạng thái'); }
   };
 
-  const handleDownloadPdf = async () => {
+  const handleUpdateActuals = async () => {
     try {
-      message.loading({ content: 'Đang tạo file PDF...', key: 'pdf_vd' });
-      await vanDonService.exportPdf(id);
-      message.success({ content: 'Đã xuất PDF và gửi Email!', key: 'pdf_vd' });
-    } catch (error) {
-      message.error({ content: 'Lỗi khi tải PDF', key: 'pdf_vd' });
-    }
+      const vals = await actualsForm.validateFields();
+      setSavingActuals(true);
+      const itemActuals = Object.entries(vals.item_actuals || {}).map(([itemId, v]) => ({ booking_item_id: Number(itemId), ...v }));
+      const tongTrongLuong = itemActuals.reduce((s, i) => s + (Number(i.trong_luong_thuc_te) || 0), 0);
+      
+      // Gửi CẢ ĐỊA CHỈ & KHOẢNG CÁCH MỚI xuống Backend
+      await vanDonService.chotSoLieu(id, {
+        trongLuongChot: tongTrongLuong, kichThuocChot: itemActuals,
+        nguoi_gui_ten: vals.nguoi_gui_ten, nguoi_gui_sdt: vals.nguoi_gui_sdt,
+        nguoi_nhan_ten: vals.nguoi_nhan_ten, nguoi_nhan_sdt: vals.nguoi_nhan_sdt,
+        diem_lay_chi_tiet: diemLay, diem_giao_chi_tiet: diemGiao, so_km_api: khoangCach, // 🚀 Thêm Data Mới
+        hinh_thuc_thanh_toan: vals.hinh_thuc_thanh_toan, tien_cod_thu_ho: vals.tien_cod_thu_ho
+      });
+      message.success(`Đã cập nhật thông tin và chốt số liệu thành công!`);
+      loadDetail();
+    } catch { message.error('Vui lòng kiểm tra lại số liệu nhập'); }
+    finally { setSavingActuals(false); }
   };
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 50 }}><Spin size="large" /></div>;
+  if (loading) return <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>;
   if (!data) return null;
 
-  const canModify = data.trang_thai === 'CONFIRMED' && data.trang_thai_thanh_toan === 'UNPAID';
-
-  const ptList = data.phieu_thus || data.phieuThuList || data.chiTietPhieuThu || data.lich_su_thu || [];
-  const calculatedDaThu = data.da_thu ?? ptList.reduce((sum, pt) => sum + Number(pt.so_tien_phan_bo || pt.so_tien || 0), 0);
-  const conLai = Number(data.gia_tri) - calculatedDaThu;
+  const isCancelled = data.trang_thai_van_chuyen === 'CANCELLED';
+  const isPaid = data.trang_thai_thanh_toan !== 'UNPAID';
+  const canUpdateActuals = !isCancelled && !isPaid; 
+  const daThu = (data.lich_su_thu || []).reduce((s, pt) => s + Number(pt.so_tien_phan_bo), 0);
+  const conLai = Math.max(0, Number(data.so_tien_chot_cuoi) - daThu);
 
   return (
-    <Card bordered={false}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <Space>
+    <div style={{ padding: '0 12px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <Space size={12} align="center">
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/van-don')} />
-          <Title level={4} style={{ margin: 0 }}>Vận đơn {data.id}</Title>
-          <StatusTag status={data.trang_thai} />
+          <Title level={4} style={{ margin: 0 }}>Vận đơn: <span style={{ color: '#1890ff' }}>{data.ma_van_don}</span></Title>
+          <StatusTag status={data.trang_thai_van_chuyen} />
+          <Tag color={{ PAID: 'success', PARTIAL: 'warning', UNPAID: 'default' }[data.trang_thai_thanh_toan]}>{data.trang_thai_thanh_toan}</Tag>
         </Space>
-        
-        {canModify && (
-          <Space>
-            <Button type="primary" icon={<PrinterOutlined />} onClick={handleDownloadPdf} style={{ backgroundColor: '#722ed1' }}>
-              Xuất & Gửi Khách hàng
-            </Button>
-            
-            <Button icon={<EditOutlined />} onClick={() => {
-              editForm.setFieldsValue({ 
-                trongLuongThucTe: data.trong_luong_thuc_te || data.trong_luong_du_kien,
-                nguoiLienHeLay: data.nguoi_lien_he_lay,
-                nguoiLienHeGiao: data.nguoi_lien_he_giao 
-              });
-              setIsEditModalVisible(true);
-            }}>
-              Cập nhật Thông tin
-            </Button>
-            <Button danger icon={<CloseOutlined />} onClick={() => setIsCancelModalVisible(true)}>
-              Hủy đơn
-            </Button>
-          </Space>
-        )}
+        {!isCancelled && <Button danger icon={<CloseOutlined />} onClick={() => Modal.confirm({ title: 'Xác nhận Hủy', content: 'Hành động này không thể hoàn tác.', okType: 'danger', onOk: async () => { try { await vanDonService.huyVanDon(id); message.success('Đã hủy!'); loadDetail(); } catch { message.error('Lỗi hủy đơn'); } } })}>Hủy Đơn</Button>}
       </div>
 
-      <Row gutter={48}>
-        {/* ... (Đoạn Row hiển thị thông tin Vận đơn giữ nguyên như cũ của bạn) ... */}
-        <Col span={12}>
-          <Divider orientation="left">Thông tin vận đơn</Divider>
-          <div style={{ lineHeight: '2.5' }}>
-            <Row><Col span={8}><Text type="secondary">Khách hàng</Text></Col><Col span={16}><Text strong>{data.ten_cong_ty || `ID: ${data.khach_hang_id}`}</Text></Col></Row>
-            <Row><Col span={8}><Text type="secondary">Ngày VC</Text></Col><Col span={16}><Text strong>{formatDate(data.ngay_van_chuyen)}</Text></Col></Row>
-            <Row><Col span={8}><Text type="secondary">Liên hệ lấy</Text></Col><Col span={16}>{data.nguoi_lien_he_lay}</Col></Row>
-            <Row><Col span={8}><Text type="secondary">Liên hệ giao</Text></Col><Col span={16}>{data.nguoi_lien_he_giao}</Col></Row>
-          </div>
+      <Form form={actualsForm} layout="vertical">
+        <Row gutter={16}>
+          {/* ════════ CỘT TRÁI (INFO -> CÂN ĐO -> BẢN ĐỒ TO) ════════ */}
+          <Col xs={24} lg={15}>
+            <Card size="small" bordered={false} style={{ marginBottom: 12, borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>📍 Thông tin Liên hệ & Địa chỉ</Text>}>
+              <Row gutter={24}>
+                <Col span={12}>
+                  <div style={{ padding: '10px', borderRadius: 6, borderLeft: '4px solid #1890ff', backgroundColor: '#f0f5ff' }}>
+                    <Form.Item name="nguoi_gui_ten" label="Người Gửi" style={{ marginBottom: 8 }} rules={[{ required: true }]}><Input disabled={!canUpdateActuals} /></Form.Item>
+                    <Form.Item name="nguoi_gui_sdt" label="SĐT Gửi" style={{ marginBottom: 8 }} rules={[{ required: true }]}><Input disabled={!canUpdateActuals} /></Form.Item>
+                    <Form.Item label="Địa chỉ lấy hàng (Sửa/Tìm trên Goong)" style={{ marginBottom: 0 }}>
+                      {/* 🚀 AUTOCOMPLETE ĐỊA CHỈ */}
+                      <AutoComplete value={diemLay} options={optionsLay} onSearch={(v) => handleSearchAddress(v, 'origin')} onSelect={setDiemLay} onChange={setDiemLay} disabled={!canUpdateActuals}>
+                        <Input.TextArea autoSize={{ minRows: 2, maxRows: 3 }} />
+                      </AutoComplete>
+                    </Form.Item>
+                  </div>
+                </Col>
+                <Col span={12}>
+                  <div style={{ padding: '10px', borderRadius: 6, borderLeft: '4px solid #52c41a', backgroundColor: '#f6ffed' }}>
+                    <Form.Item name="nguoi_nhan_ten" label="Người Nhận" style={{ marginBottom: 8 }} rules={[{ required: true }]}><Input disabled={!canUpdateActuals} /></Form.Item>
+                    <Form.Item name="nguoi_nhan_sdt" label="SĐT Nhận" style={{ marginBottom: 8 }} rules={[{ required: true }]}><Input disabled={!canUpdateActuals} /></Form.Item>
+                    <Form.Item label="Địa chỉ giao hàng (Sửa/Tìm trên Goong)" style={{ marginBottom: 0 }}>
+                      <AutoComplete value={diemGiao} options={optionsGiao} onSearch={(v) => handleSearchAddress(v, 'destination')} onSelect={setDiemGiao} onChange={setDiemGiao} disabled={!canUpdateActuals}>
+                        <Input.TextArea autoSize={{ minRows: 2, maxRows: 3 }} />
+                      </AutoComplete>
+                    </Form.Item>
+                  </div>
+                </Col>
+              </Row>
+            </Card>
 
-          <div style={{ marginTop: 16, padding: 16, backgroundColor: '#fafafa', borderRadius: 8 }}>
-            <Row style={{ marginBottom: 8 }}>
-              <Col span={8}><Text type="secondary">TL dự kiến</Text></Col>
-              <Col span={16}><Text strong>{data.trong_luong_du_kien} kg</Text> ➔ <CurrencyText value={data.gia_tri_du_kien}/></Col>
-            </Row>
-            <Row>
-              <Col span={8}><Text type="secondary">TL thực tế</Text></Col>
-              <Col span={16}>
-                {data.trong_luong_thuc_te ? (
-                  <><Text strong style={{ color: '#1890ff' }}>{data.trong_luong_thuc_te} kg</Text> ➔ <CurrencyText value={data.gia_tri_thuc_te} style={{ color: '#cf1322' }}/></>
-                ) : <Text italic type="secondary">Chưa cập nhật</Text>}
-              </Col>
-            </Row>
-          </div>
-        </Col>
+            <Card size="small" bordered={false} style={{ marginBottom: 12, borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>⚖️ Cập nhật Số kg (Thủ Kho)</Text>}>
+              {(!data.items || data.items.length === 0) ? <Alert message="Lỗi tải hàng hóa" type="error" /> : (
+                (data.items || []).map((item, idx) => (
+                  <div key={item.id} style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 6, padding: '12px', marginBottom: 10 }}>
+                    <Text strong>{idx + 1}. {item.ten_hang} ({item.so_luong} {item.ten_dvt})</Text>
+                    <Row gutter={[8, 0]} align="bottom" style={{ marginTop: 10 }}>
+                      <Col span={6}>
+                        <Form.Item name={['item_actuals', item.id, 'trong_luong_thuc_te']} label="Cân thực (kg)" style={{ marginBottom: 0 }} rules={[{ required: true }]}>
+                          <InputNumber style={{ width: '100%' }} min={0.01} step={0.1} disabled={!canUpdateActuals} />
+                        </Form.Item>
+                      </Col>
+                      {item.cau_hinh_thuoc_tinh?.includes('dai_cm') && (
+                          <Col span={14}>
+                            <Space.Compact style={{ width: '100%' }}>
+                              <Form.Item name={['item_actuals', item.id, 'dai_cm']} noStyle><InputNumber placeholder="Dài" disabled={!canUpdateActuals} /></Form.Item>
+                              <Form.Item name={['item_actuals', item.id, 'rong_cm']} noStyle><InputNumber placeholder="Rộng" disabled={!canUpdateActuals} /></Form.Item>
+                              <Form.Item name={['item_actuals', item.id, 'cao_cm']} noStyle><InputNumber placeholder="Cao" disabled={!canUpdateActuals} /></Form.Item>
+                            </Space.Compact>
+                          </Col>
+                      )}
+                    </Row>
+                  </div>
+                ))
+              )}
+            </Card>
 
-        {/* CỘT PHẢI: THANH TOÁN */}
-        <Col span={12}>
-          <Divider orientation="left">Thanh toán</Divider>
-          <div style={{ lineHeight: '2.5' }}>
-            <Row><Col span={8}><Text type="secondary">Giá trị cuối</Text></Col><Col span={16}><CurrencyText value={data.gia_tri} style={{ fontSize: 18, color: '#cf1322' }}/></Col></Row>
-            <Row><Col span={8}><Text type="secondary">Đã thu</Text></Col><Col span={16}><CurrencyText value={calculatedDaThu} style={{ color: '#52c41a', fontWeight: 'bold' }}/></Col></Row>
-            <Row><Col span={8}><Text type="secondary">Còn lại</Text></Col><Col span={16}><CurrencyText value={conLai > 0 ? conLai : 0} style={{ color: conLai > 0 ? '#fa8c16' : '#52c41a' }}/></Col></Row>
-            <Row><Col span={8}><Text type="secondary">Hạn TT</Text></Col><Col span={16}><Text strong>{formatDate(data.ngay_het_han_thanh_toan)}</Text></Col></Row>
-            <Row><Col span={8}><Text type="secondary">Trạng thái TT</Text></Col><Col span={16}><StatusTag status={data.trang_thai_thanh_toan} /></Col></Row>
-            {data.trang_thai === 'CANCELLED' && (
-              <Row><Col span={8}><Text type="secondary">Lý do hủy</Text></Col><Col span={16}><Text type="danger">{data.ly_do_huy}</Text></Col></Row>
-            )}
-          </div>
-        </Col>
-      </Row>
+            <Card size="small" bordered={false} style={{ borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>🗺️ Bản đồ Lộ trình (Kéo thả Maker để đổi địa chỉ)</Text>}>
+              {/* 🚀 BẢN ĐỒ NẰM DƯỚI CÙNG VÀ CỰC KỲ RỘNG RÃI */}
+              <div style={{ width: '100%', height: '550px', backgroundColor: '#fafafa', borderRadius: '8px', overflow: 'hidden' }}>
+                <GoongMapRoute 
+                  originAddress={diemLay} 
+                  destinationAddress={diemGiao} 
+                  onAddressChange={(type, newAddr) => { type === 'origin' ? setDiemLay(newAddr) : setDiemGiao(newAddr) }}
+                  onRouteCalculated={(newKm) => setKhoangCach(newKm)} // Nhận Km mới
+                />
+              </div>
+            </Card>
+          </Col>
 
-      {/* LỊCH SỬ PHIẾU THU */}
-      <Divider orientation="left">Lịch sử phiếu thu</Divider>
-      <Table 
-        dataSource={ptList} 
-        rowKey={(record) => record.id || record.phieu_thu_id || Math.random()} 
-        pagination={false}
-        locale={{ emptyText: 'Chưa có giao dịch thanh toán nào' }}
-        columns={[
-          { title: 'Ngày', render: (_, r) => formatDate(r.ngay_thu || r.created_at) },
-          { title: 'Số tiền', align: 'right', render: (_, r) => <CurrencyText value={r.so_tien_phan_bo || r.so_tien} style={{ color: '#52c41a', fontWeight: 500 }}/> },
-          { title: 'Hình thức', dataIndex: 'hinh_thuc' },
-          { title: 'Tham chiếu', render: (_, r) => r.so_tham_chieu || r.tham_chieu || '--' }
-        ]}
-      />
+          {/* ════════ CỘT PHẢI (TRẠNG THÁI & TÀI CHÍNH) ════════ */}
+          <Col xs={24} lg={9}>
+            <div style={{ position: 'sticky', top: 20 }}>
+              
+              <Card size="small" bordered={false} style={{ marginBottom: 12, borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>🚚 Trạng thái Xe</Text>}>
+                <Row gutter={8}>
+                  <Col span={16}>
+                    <Select value={routeStatus} onChange={setRouteStatus} style={{ width: '100%' }} disabled={isCancelled}>
+                      <Option value="CHO_LAY">📦 Chờ lấy hàng</Option><Option value="LUU_KHO_DI">🏭 Lưu kho đi</Option>
+                      <Option value="DANG_CHAY">🚚 Đang chạy tuyến</Option><Option value="LUU_KHO_DEN">🏬 Lưu kho đến</Option>
+                      <Option value="DANG_GIAO">🛵 Đang giao</Option><Option value="DA_GIAO">✅ Đã giao</Option>
+                    </Select>
+                  </Col>
+                  <Col span={8}><Button type="primary" onClick={handleUpdateStatus} disabled={isCancelled} block>Cập Nhật</Button></Col>
+                </Row>
+              </Card>
 
-      {/* --- MODALS --- */}
-      {/* 🚀 FIX: Thêm trường Liên hệ vào Modal Cập nhật */}
-      <Modal title="Cập nhật Thông tin Vận đơn" open={isEditModalVisible} onCancel={() => setIsEditModalVisible(false)} onOk={() => editForm.submit()} destroyOnClose>
-        <Form form={editForm} layout="vertical" onFinish={handleUpdate}>
-          <Form.Item name="trongLuongThucTe" label="Số Kg thực tế sau khi cân" rules={[{ required: true, message: 'Bắt buộc nhập' }]}>
-            <InputNumber style={{ width: '100%' }} min={0.1} />
-          </Form.Item>
-          <Form.Item name="nguoiLienHeLay" label="Người liên hệ lấy hàng (Kho đi)" rules={[{ required: true, message: 'Vui lòng nhập' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="nguoiLienHeGiao" label="Người liên hệ nhận hàng (Kho đến)" rules={[{ required: true, message: 'Vui lòng nhập' }]}>
-            <Input />
-          </Form.Item>
-          <Text type="secondary" italic>Hệ thống sẽ tự động tính lại "Giá trị" của Vận đơn này.</Text>
-        </Form>
-      </Modal>
+              <Card size="small" bordered={false} style={{ marginBottom: 12, borderRadius: 8, border: '1px solid #1890ff' }} title={<Text strong>💰 Tài chính</Text>}>
+                <Row gutter={8}>
+                  <Col span={12}>
+                    <Form.Item name="hinh_thuc_thanh_toan" label="Thu tiền" style={{ marginBottom: 10 }}>
+                      <Select disabled={!canUpdateActuals || data.loai_khach === 'B2C_VANG_LAI'}>
+                        <Option value="TRA_TRUOC">Trả Trước</Option><Option value="COD_THU_HO">Thu hộ (COD)</Option><Option value="GHI_NO">Công Nợ B2B</Option>
+                      </Select>
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item noStyle dependencies={['hinh_thuc_thanh_toan']}>
+                      {({ getFieldValue }) => getFieldValue('hinh_thuc_thanh_toan') === 'COD_THU_HO' && (
+                        <Form.Item name="tien_cod_thu_ho" label="Tiền COD" style={{ marginBottom: 10 }}><InputNumber style={{ width: '100%' }} disabled={!canUpdateActuals} /></Form.Item>
+                      )}
+                    </Form.Item>
+                  </Col>
+                </Row>
 
-      <Modal title="Xác nhận Hủy Vận đơn" open={isCancelModalVisible} onCancel={() => setIsCancelModalVisible(false)} onOk={() => cancelForm.submit()} destroyOnClose okType="danger" okText="Xác nhận Hủy">
-        <Form form={cancelForm} layout="vertical" onFinish={handleCancel}>
-          <Form.Item name="lyDoHuy" label="Lý do hủy" rules={[{ required: true, message: 'Vui lòng nhập lý do' }]}>
-            <Input.TextArea rows={3} placeholder="Ví dụ: Khách báo hoãn chuyến..." />
-          </Form.Item>
-        </Form>
-      </Modal>
-    </Card>
+                <div style={{ background: '#fdfdfd', padding: '10px', borderRadius: 6, border: '1px solid #eee' }}>
+                  <Row justify="space-between"><Text>Khoảng cách:</Text> <Text strong>{khoangCach} Km</Text></Row>
+                  <Divider style={{ margin: '8px 0' }} />
+                  <Row justify="space-between"><Text>Tổng cước:</Text> <CurrencyText value={data.so_tien_chot_cuoi} style={{ color: '#cf1322', fontWeight: 'bold' }} /></Row>
+                  <Row justify="space-between"><Text>Đã thanh toán:</Text> <CurrencyText value={daThu} style={{ color: '#52c41a' }} /></Row>
+                  <Divider style={{ margin: '8px 0' }} />
+                  <Row justify="space-between"><Text strong>Còn nợ lại:</Text> <CurrencyText value={conLai} style={{ color: conLai > 0 ? '#fa8c16' : '#52c41a', fontWeight: 'bold', fontSize: 16 }} /></Row>
+                </div>
+
+                <div style={{ marginTop: 15 }}>
+                  <Button block type="primary" size="large" icon={<SaveOutlined />} onClick={handleUpdateActuals} loading={savingActuals} disabled={!canUpdateActuals} style={{ marginBottom: 10 }}>Lưu Thay Đổi & Chốt Phí</Button>
+                  <Row gutter={8}>
+                    <Col span={12}><Button block icon={<PrinterOutlined />} onClick={() => vanDonService.exportPdf?.(id)} style={{ color: '#722ed1' }}>In PDF</Button></Col>
+                    <Col span={12}><Button block icon={<MessageOutlined style={{ color: '#1890ff' }}/>} onClick={() => window.open('https://chat.zalo.me', '_blank')}>Gửi Zalo</Button></Col>
+                  </Row>
+                  <Button block icon={<MailOutlined />} onClick={async () => { message.loading({ content: 'Đang gửi email...', key: 'email_vd' }); try { await vanDonService.sendEmail(id); message.success({ content: 'Đã gửi Email thành công!', key: 'email_vd' }); } catch { message.error({ content: 'Gửi Email thất bại', key: 'email_vd' }); } }} style={{ marginTop: 10 }}>Gửi Email Cho Khách</Button>
+                </div>
+              </Card>
+
+              <Card size="small" bordered={false} style={{ borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>📋 Lịch sử Phiếu Thu</Text>}>
+                <Table dataSource={data.lich_su_thu || []} rowKey={(_, i) => i} pagination={false} size="small" locale={{ emptyText: 'Chưa có giao dịch' }}
+                  columns={[
+                    { title: 'Ngày', width: 85, render: (_, r) => formatDate(r.ngay_thu) },
+                    { title: 'Số tiền', align: 'right', render: (_, r) => <CurrencyText value={r.so_tien_phan_bo} style={{ color: '#52c41a', fontWeight: 500 }} /> },
+                    { title: 'Mã CT', dataIndex: 'so_tham_chieu', width: 90 },
+                  ]}
+                />
+              </Card>
+            </div>
+          </Col>
+        </Row>
+      </Form>
+    </div>
   );
 };
 

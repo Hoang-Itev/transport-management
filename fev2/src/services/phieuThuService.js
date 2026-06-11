@@ -5,12 +5,15 @@ export const phieuThuService = {
   getById: (id) => axiosClient.get(`/phieu-thu/${id}`),
   create: (data) => axiosClient.post('/phieu-thu', data),
 
-  // 🚀 THÊM DÒNG NÀY ĐỂ GỌI API AI QUÉT BILL
+  // 🚀 API AI QUÉT BILL
   scanBill: (formData) => axiosClient.post('/phieu-thu/scan-bill', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+
+  // 🚀 BỔ SUNG THÊM DÒNG NÀY: Để UI gọi được nút Gửi Email
+  sendEmail: (id) => axiosClient.post(`/phieu-thu/${id}/gui-mail`),
 
   exportPdf: async (id) => {
     try {
-      // 🚀 FIX 1: Đổi chữ 'van-don' thành 'phieu-thu'
+      // Đổi chữ 'van-don' thành 'phieu-thu'
       const response = await axiosClient.get(`/phieu-thu/${id}/xuat-pdf`, { 
         responseType: 'blob' 
       });
@@ -28,7 +31,7 @@ export const phieuThuService = {
       const link = document.createElement('a');
       link.href = url;
       
-      // 🚀 FIX 2: Đổi tên file tải về cho đúng chuẩn Phiếu Thu
+      // Đổi tên file tải về cho đúng chuẩn Phiếu Thu
       link.setAttribute('download', `PhieuThu-PT${id}.pdf`); 
       
       document.body.appendChild(link);

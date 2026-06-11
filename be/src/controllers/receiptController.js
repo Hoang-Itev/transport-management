@@ -1,11 +1,9 @@
 const Receipt = require('../models/receiptModel');
 const db = require('../config/database');
-const puppeteer = require('puppeteer'); // THÊM THƯ VIỆN TẠO PDF
+const puppeteer = require('puppeteer'); 
 const { sendReceiptEmail } = require('../services/emailService');
-const { sendTelegramMessage } = require('../services/telegramService'); // THÊM DÒNG NÀY
-
-const sharp = require('sharp');//chinh mau anh
-const Tesseract = require('tesseract.js');//ai scan anh
+const { sendTelegramMessage } = require('../services/telegramService');
+const { scanBillWithGemini } = require('../services/aiCopilotService');
 
 const getReceipts = async (req, res) => {
   try {
@@ -29,55 +27,55 @@ const getReceiptById = async (req, res) => {
 // [POST] Tạo phiếu thu (và tự động gửi Email)
 const createReceipt = async (req, res) => {
   try {
-    const { khachHangId, tongSoTien, ngayThu, hinhThuc, soThamChieu, ghiChu, phanBo } = req.body;
+    // 🚀 FIX LỖI: Lấy cả tongSoTien (FE gửi) và soTienNhanDuoc, thằng nào có data thì dùng thằng đó
+    const { khachHangId, tongSoTien, soTienNhanDuoc, ngayThu, hinhThuc, soThamChieu, hinhAnhBill, ghiChu, phanBo } = req.body;
+    
+    // Gộp chung lại thành 1 biến số tiền thực tế
+    const tienThucTe = Number(tongSoTien || soTienNhanDuoc || 0);
 
-    // Validation 1: duplicate vanDonId trong phanBo
     const vanDonIds = phanBo.map(p => p.vanDonId);
     const uniqueIds = new Set(vanDonIds);
     if (uniqueIds.size !== vanDonIds.length) {
       return res.status(422).json({ success: false, error: { code: 'PHAN_BO_TRUNG_VAN_DON', message: 'Danh sách phân bổ có vận đơn bị trùng' } });
     }
 
-    // Validation 2: sum(phanBo) == tongSoTien
     const tongPhanBo = phanBo.reduce((sum, p) => sum + Number(p.soTienPhanBo), 0);
-    if (Math.abs(tongPhanBo - Number(tongSoTien)) > 0.01) {
-      return res.status(422).json({ success: false, error: { code: 'TONG_PHAN_BO_KHONG_KHOP', message: `Tổng phân bổ (${tongPhanBo.toLocaleString('vi-VN')}) không bằng tổng phiếu thu (${Number(tongSoTien).toLocaleString('vi-VN')})` } });
+    if (Math.abs(tongPhanBo - tienThucTe) > 0.01) {
+      return res.status(422).json({ success: false, error: { code: 'TONG_PHAN_BO_KHONG_KHOP', message: `Tổng phân bổ (${tongPhanBo.toLocaleString('vi-VN')}) không bằng tổng phiếu thu (${tienThucTe.toLocaleString('vi-VN')})` } });
     }
 
-    // Validation 3 + 4: VĐ thuộc đúng KH + không phải PAID
     const placeholders = vanDonIds.map(() => '?').join(',');
     const [vanDons] = await db.query(
-      `SELECT vd.id, vd.trang_thai_thanh_toan, bg.khach_hang_id
+      `SELECT vd.ma_van_don, vd.trang_thai_thanh_toan, bg.khach_hang_id
        FROM van_dons vd
-       JOIN bao_gia_chi_tiets ct ON vd.bao_gia_chi_tiet_id = ct.id
-       JOIN bao_gias bg ON ct.bao_gia_id = bg.id
-       WHERE vd.id IN (${placeholders})`,
+       JOIN bookings bk ON vd.booking_id = bk.id
+       JOIN bao_gias bg ON bk.bao_gia_id = bg.id
+       WHERE vd.ma_van_don IN (${placeholders})`,
       vanDonIds
     );
 
     for (const vd of vanDons) {
       if (Number(vd.khach_hang_id) !== Number(khachHangId)) {
-        return res.status(422).json({ success: false, error: { code: 'VANDON_KHONG_THUOC_KHACH_HANG', message: `Vận đơn ${vd.id} không thuộc khách hàng này` } });
+        return res.status(422).json({ success: false, error: { code: 'VANDON_KHONG_THUOC_KHACH_HANG', message: `Vận đơn ${vd.ma_van_don} không thuộc khách hàng này` } });
       }
       if (vd.trang_thai_thanh_toan === 'PAID') {
-        return res.status(422).json({ success: false, error: { code: 'VANDON_DA_PAID', message: `Vận đơn ${vd.id} đã thanh toán đủ` } });
+        return res.status(422).json({ success: false, error: { code: 'VANDON_DA_PAID', message: `Vận đơn ${vd.ma_van_don} đã thanh toán đủ` } });
       }
     }
 
-    // Validation: VĐ không tồn tại
     if (vanDons.length !== vanDonIds.length) {
       return res.status(404).json({ success: false, error: { code: 'VANDON_NOT_FOUND', message: 'Một hoặc nhiều vận đơn không tồn tại' } });
     }
 
-    // 🚀 KHAI BÁO 1 LẦN DUY NHẤT Ở ĐÂY
     const phieuThuId = await Receipt.create({
-      khachHangId, tongSoTien, ngayThu, hinhThuc,
-      soThamChieu, ghiChu, phanBo,
+      khachHangId, 
+      tongSoTien: tienThucTe, // 🚀 TRUYỀN ĐÚNG SỐ TIỀN VÀO MODEL
+      ngayThu, hinhThuc,
+      soThamChieu, hinhAnhBill, ghiChu, phanBo,
       nguoiGhiNhanId: req.user.id
     });
 
-    // 🚀 THÊM TÍCH HỢP TELEGRAM BOT Ở ĐÂY
-    const soTienFormat = Number(tongSoTien).toLocaleString('vi-VN');
+    const soTienFormat = tienThucTe.toLocaleString('vi-VN');
     const msg = `
 💰 <b>TIỀN VỀ TÀI KHOẢN!</b>
 -----------------------------------
@@ -87,9 +85,13 @@ Số tiền thu: <b>${soTienFormat} VNĐ</b>
 Hình thức: ${hinhThuc === 'CHUYEN_KHOAN' ? '🏦 Chuyển khoản' : '💵 Tiền mặt'}
 Kế toán vừa ghi nhận hệ thống!
     `;
-    sendTelegramMessage(msg); // Chạy ngầm
+    
+    // Gửi Telegram ngầm, nếu lỗi cũng không làm sập ứng dụng
+    if (typeof sendTelegramMessage === 'function') {
+        sendTelegramMessage(msg).catch(e => console.log('Lỗi Telegram:', e));
+    }
 
-    // 🚀 TIẾN TRÌNH GỬI EMAIL NGẦM
+    // Gửi Email tự động ngầm
     try {
       const [khRows2] = await db.query(`SELECT email, ten_cong_ty FROM khach_hangs WHERE id = ?`, [khachHangId]);
       const khachHangMail = khRows2[0];
@@ -99,7 +101,6 @@ Kế toán vừa ghi nhận hệ thống!
         const mockRes = {
           setHeader: () => {},
           send: (buffer) => {
-            // Nhớ đảm bảo bạn đã require sendReceiptEmail ở đầu file nhé
             sendReceiptEmail(khachHangMail.email, khachHangMail.ten_cong_ty, phieuThuId, buffer)
               .catch(e => console.log('Lỗi Background gửi mail PT:', e));
           }
@@ -125,7 +126,6 @@ const exportPdf = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 1. Lấy thông tin chung của Phiếu thu (Bổ sung kh.email)
     const [ptRows] = await db.query(`
       SELECT pt.*, kh.ten_cong_ty, kh.so_dien_thoai, kh.dia_chi, kh.email, u.ho_ten as nguoi_lap
       FROM phieu_thus pt
@@ -134,12 +134,9 @@ const exportPdf = async (req, res) => {
       WHERE pt.id = ?
     `, [id]);
 
-    if (ptRows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy phiếu thu' });
-    }
+    if (ptRows.length === 0) return res.status(404).json({ success: false, message: 'Không tìm thấy phiếu thu' });
     const pt = ptRows[0];
 
-    // 2. Lấy danh sách các vận đơn được phân bổ
     const [chiTiet] = await db.query(`
       SELECT van_don_id, so_tien_phan_bo 
       FROM phieu_thu_chi_tiets 
@@ -157,7 +154,6 @@ const exportPdf = async (req, res) => {
       `;
     });
 
-    // 3. Render HTML
     const htmlContent = `
       <html>
         <head>
@@ -189,37 +185,20 @@ const exportPdf = async (req, res) => {
             <div class="row"><div class="label">Khách hàng:</div><div class="value"><strong>${pt.ten_cong_ty}</strong></div></div>
             <div class="row"><div class="label">Số điện thoại:</div><div class="value">${pt.so_dien_thoai}</div></div>
             <div class="row"><div class="label">Địa chỉ:</div><div class="value">${pt.dia_chi || '---'}</div></div>
-            <div class="row"><div class="label">Hình thức thanh toán:</div><div class="value">${pt.hinh_thuc === 'TIEN_MAT' ? 'Tiền mặt' : 'Chuyển khoản'}</div></div>
-            <div class="row"><div class="label">Số tham chiếu (GD):</div><div class="value">${pt.so_tham_chieu || '---'}</div></div>
+            <div class="row"><div class="label">Hình thức:</div><div class="value">${pt.hinh_thuc === 'TIEN_MAT' ? 'Tiền mặt' : 'Chuyển khoản'}</div></div>
             <div class="row"><div class="label">Ghi chú:</div><div class="value">${pt.ghi_chu || '---'}</div></div>
           </div>
 
           <table>
-            <thead>
-              <tr>
-                <th style="width: 50px; text-align: center;">STT</th>
-                <th>Mã Vận Đơn Thanh Toán</th>
-                <th style="text-align: right;">Số Tiền Ghi Nhận</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rowsHtml}
-            </tbody>
+            <thead><tr><th style="width: 50px; text-align: center;">STT</th><th>Mã Vận Đơn Thanh Toán</th><th style="text-align: right;">Số Tiền Ghi Nhận</th></tr></thead>
+            <tbody>${rowsHtml}</tbody>
           </table>
 
-          <div class="total-row">
-            TỔNG SỐ TIỀN THU: ${Number(pt.tong_so_tien).toLocaleString('vi-VN')} VNĐ
-          </div>
+          <div class="total-row">TỔNG SỐ TIỀN THU: ${Number(pt.so_tien_nhan_duoc).toLocaleString('vi-VN')} VNĐ</div>
 
           <div class="footer">
-            <div class="sign-box">
-              <div class="sign-title">Người nộp tiền</div>
-              <div>(Ký và ghi rõ họ tên)</div>
-            </div>
-            <div class="sign-box">
-              <div class="sign-title">Kế toán / Người thu tiền</div>
-              <div><strong>${pt.nguoi_lap}</strong></div>
-            </div>
+            <div class="sign-box"><div class="sign-title">Người nộp tiền</div><div>(Ký và ghi rõ họ tên)</div></div>
+            <div class="sign-box"><div class="sign-title">Kế toán / Người thu tiền</div><div><strong>${pt.nguoi_lap}</strong></div></div>
           </div>
         </body>
       </html>
@@ -231,98 +210,83 @@ const exportPdf = async (req, res) => {
     const pdfBuffer = await page.pdf({ format: 'A5', landscape: true, printBackground: true }); 
     await browser.close();
 
-    // 🚀 TỰ ĐỘNG GỬI MAIL KHI XUẤT PDF PHIẾU THU
-    if (pt.email) {
-      sendReceiptEmail(pt.email, pt.ten_cong_ty, id, pdfBuffer)
-        .catch(e => console.error("Lỗi gửi mail Phiếu thu khi in:", e));
-    }
-
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="PhieuThu-PT${id}.pdf"`);
     res.send(pdfBuffer);
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
 };
 
 // [POST] Quét ảnh Bill bằng AI (Có tích hợp Tiền xử lý ảnh - Preprocessing)
+// 🚀 ĐÃ FIX: Chỉ sử dụng sức mạnh của Gemini, dọn dẹp code rác
+// 🚀 ĐÃ BỔ SUNG CONSOLE.LOG ĐỂ IN RA KẾT QUẢ AI
 const scanBill = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Vui lòng tải lên ảnh bill chuyển khoản' });
     }
 
-    console.log('🖼️ Đang tiền xử lý hình ảnh (Khử nhiễu, chỉnh màu)...');
+    console.log(`🤖 Đang đẩy ảnh lên Gemini... (Type: ${req.file.mimetype}, Size: ${req.file.size} bytes)`);
 
-    // 🚀 BƯỚC 1.5: TIỀN XỬ LÝ ẢNH BẰNG SHARP (IMAGE PRE-PROCESSING)
-    // Phép thuật nằm ở đây: Xử lý cái bill MB Bank "khó nhằn"
-    const processedImageBuffer = await sharp(req.file.buffer)
-      .grayscale()   // 1. Biến ảnh màu thành Trắng/Đen (Khử nền gradient)
-      .normalize()   // 2. Kéo dãn độ tương phản lên mức tối đa
-      .negate()      // 3. ĐẢO MÀU: Biến chữ trắng/nền đen thành CHỮ ĐEN/NỀN TRẮNG (Tesseract cực kỳ thích điều này)
-      .toBuffer();
+    // Chuyển thẳng ảnh cho Gemini đọc
+    const aiData = await scanBillWithGemini(req.file.buffer, req.file.mimetype);
 
-    console.log('🤖 AI đang đọc văn bản từ ảnh đã xử lý... Vui lòng đợi...');
+    // 🚀 IN RA MÀN HÌNH TERMINAL ĐỂ KIỂM TRA DỮ LIỆU
+    console.log('=============================================');
+    console.log('🧠 KẾT QUẢ GEMINI BÓC TÁCH TỪ ẢNH BILL:');
+    console.log(JSON.stringify(aiData, null, 2)); // null, 2 giúp in JSON thụt lề cho đẹp
+    console.log('=============================================');
 
-    // 2. Đưa cái ảnh CHỮ ĐEN NỀN TRẮNG vừa tạo vào cho Tesseract đọc
-    const { data: { text } } = await Tesseract.recognize(
-      processedImageBuffer,
-      'vie+eng' 
-    );
-
-    console.log('📝 Chữ AI đọc được (Sau khi xử lý ảnh):\n', text);
-
-    // 3. XỬ LÝ NHIỄU OCR BẰNG CODE
-    let fixedText = text.replace(/[Oo]/g, '0').replace(/\n/g, ' ');
-
-    // 4. LOGIC REGEX TÌM TIỀN
-    const vndRegex = /([0-9.,\s]+)\s*(?:VND|VNĐ|Đ|VNO|VN0|YND|Vnd)/i;
-    const matchVND = fixedText.match(vndRegex);
-
-    let finalAmount = 0;
-
-    if (matchVND && matchVND[1]) {
-      const cleanStr = matchVND[1].replace(/[^0-9]/g, '');
-      finalAmount = Number(cleanStr);
-      console.log(`🎯 Đã chốt số bằng chữ VND: ${finalAmount}`);
-    } else {
-      const fallbackRegex = /\b\d{1,3}(?:[.,\s]\d{3})+\b/g;
-      const foundNumbers = fixedText.match(fallbackRegex);
-      
-      if (foundNumbers && foundNumbers.length > 0) {
-        const cleanNumbers = foundNumbers.map(str => Number(str.replace(/[^0-9]/g, '')));
-        const validAmounts = cleanNumbers.filter(num => num >= 1000 && num <= 1000000000);
-        
-        if (validAmounts.length > 0) {
-          finalAmount = Math.max(...validAmounts); 
-          console.log(`🎯 Đã chốt số lớn nhất trên bill: ${finalAmount}`);
-        }
-      }
-    }
-
-    // 5. Kiểm tra kết quả
-    if (finalAmount <= 0 || isNaN(finalAmount)) {
+    if (!aiData.tongSoTien || aiData.tongSoTien <= 0) {
       return res.status(200).json({ 
         success: true, 
-        message: 'AI đọc được chữ nhưng không tìm thấy số tiền nào hợp lệ',
-        data: { tongSoTien: 0, rawText: text } 
+        message: 'AI đọc được ảnh nhưng không thấy số tiền hợp lệ.',
+        // Đảm bảo cấu trúc trả về rỗng không làm sập Frontend
+        data: { tongSoTien: 0, noiDung: '', tenNguoiChuyen: '', maVanDonList: [] } 
       });
     }
 
-    // 6. Trả về thành công
     res.json({
       success: true,
       message: '🤖 AI quét bill thành công!',
-      data: {
-        tongSoTien: finalAmount, 
-        rawText: text 
-      }
+      data: aiData
     });
 
   } catch (error) {
-    console.error('❌ Lỗi AI OCR:', error);
-    res.status(500).json({ success: false, message: 'Lỗi trong quá trình quét ảnh AI' });
+    console.error('❌ Lỗi AI OCR Chi Tiết:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-module.exports = { getReceipts, getReceiptById, createReceipt, exportPdf, scanBill };
+// 🚀 THÊM MỚI: API Xử lý gửi Email riêng biệt khi bấm nút
+const sendEmailManual = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [khRows] = await db.query(`
+      SELECT kh.email, kh.ten_cong_ty FROM phieu_thus pt 
+      JOIN khach_hangs kh ON pt.khach_hang_id = kh.id 
+      WHERE pt.id = ?`, [id]
+    );
+
+    if (khRows.length === 0 || !khRows[0].email) {
+      return res.status(404).json({ success: false, message: 'Khách hàng này chưa cập nhật địa chỉ Email!' });
+    }
+
+    // 1. Tạo buffer PDF trong nền
+    const mockReq = { params: { id } };
+    let pdfBuffer;
+    const mockRes = {
+      setHeader: () => {},
+      send: (buffer) => { pdfBuffer = buffer; }
+    };
+    await module.exports.exportPdf(mockReq, mockRes); // Mượn tạm hàm exportPdf để lấy File
+
+    // 2. Bắn Mail
+    await sendReceiptEmail(khRows[0].email, khRows[0].ten_cong_ty, id, pdfBuffer);
+    
+    res.json({ success: true, message: 'Đã gửi Email thành công cho khách hàng!' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Lỗi gửi mail: ' + error.message });
+  }
+};
+
+module.exports = { getReceipts, getReceiptById, createReceipt, exportPdf, scanBill, sendEmailManual };

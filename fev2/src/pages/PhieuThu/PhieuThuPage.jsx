@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Select, Button, Table, Space, Typography, DatePicker, message, Tooltip, Modal } from 'antd';
-import { PlusOutlined, EyeOutlined, PrinterOutlined } from '@ant-design/icons'; // Thêm PrinterOutlined
+import { PlusOutlined, EyeOutlined, PrinterOutlined, MailOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 
 import { phieuThuService } from '../../services/phieuThuService';
 import { khachHangService } from '../../services/khachHangService';
 import { usePagination } from '../../hooks/usePagination';
 import CurrencyText from '../../components/common/CurrencyText';
-import { formatDate } from '../../utils/formatDate';
+import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -54,31 +54,51 @@ const PhieuThuPage = () => {
     } catch (error) { message.error('Lỗi tải chi tiết phiếu thu'); }
   };
 
-  // 🚀 HÀM TẢI PDF PHIẾU THU
   const handleDownloadPdf = async (id) => {
     try {
       message.loading({ content: 'Đang tạo Phiếu thu PDF...', key: 'pdf_pt' });
       await phieuThuService.exportPdf(id);
       message.success({ content: 'Đã tải Phiếu thu PDF!', key: 'pdf_pt' });
-    } catch (error) {
-      message.error({ content: 'Lỗi khi tải PDF (Có thể do Backend chưa hỗ trợ)', key: 'pdf_pt' });
-    }
+    } catch (error) { message.error({ content: 'Lỗi khi xuất PDF', key: 'pdf_pt' }); }
+  };
+
+  const handleSendEmail = async (id) => {
+    try {
+      message.loading({ content: 'Đang gửi email...', key: 'email_pt' });
+      await phieuThuService.sendEmail(id);
+      message.success({ content: 'Đã gửi Email Phiếu thu thành công!', key: 'email_pt' });
+    } catch (error) { message.error({ content: 'Lỗi gửi mail', key: 'email_pt' }); }
   };
 
   const columns = [
-    { title: 'Mã PT', dataIndex: 'id', render: (val) => `PT-${val}` },
-    { title: 'Khách hàng', render: (_, r) => r.ten_cong_ty || `ID: ${r.khach_hang_id}` },
-    { title: 'Ngày thu', dataIndex: 'ngay_thu', render: (val) => formatDate(val) },
+    { title: 'Mã PT', dataIndex: 'id', render: (val) => <Text strong>PT-{val}</Text> },
+    { 
+      title: 'Khách hàng', 
+      render: (_, r) => r.ten_cong_ty || `ID: ${r.khach_hang_id}`,
+      // Sắp xếp theo tên Khách hàng
+      sorter: (a, b) => (a.ten_cong_ty || '').localeCompare(b.ten_cong_ty || '')
+    },
+    { 
+      title: 'Ngày thu', 
+      dataIndex: 'ngay_thu', 
+      render: (val) => dayjs(val).format('DD/MM/YYYY'),
+      // Sắp xếp theo Ngày
+      sorter: (a, b) => new Date(a.ngay_thu) - new Date(b.ngay_thu) 
+    },
     { title: 'Hình thức', dataIndex: 'hinh_thuc' },
-    { title: 'Tổng số tiền', dataIndex: 'tong_so_tien', align: 'right', render: (val) => <CurrencyText value={val} style={{ color: '#52c41a', fontWeight: 'bold' }} /> },
+    { 
+      title: 'Tổng số tiền', 
+      dataIndex: 'so_tien_nhan_duoc', 
+      align: 'right', 
+      render: (val) => <CurrencyText value={val} style={{ color: '#52c41a', fontWeight: 'bold' }} />,
+      // Sắp xếp theo Tiền
+      sorter: (a, b) => Number(a.so_tien_nhan_duoc) - Number(b.so_tien_nhan_duoc)
+    },
     { title: 'Thao tác', align: 'center', render: (_, record) => (
         <Space>
-          <Tooltip title="Xem chi tiết phân bổ">
-            <Button type="text" icon={<EyeOutlined />} onClick={() => xemChiTiet(record.id)} />
-          </Tooltip>
-          <Tooltip title="Xuất & Gửi Khách hàng">
-            <Button type="text" style={{color: '#722ed1'}} icon={<PrinterOutlined />} onClick={() => handleDownloadPdf(record.id)} />
-          </Tooltip>
+          <Tooltip title="Xem chi tiết phân bổ"><Button type="text" icon={<EyeOutlined />} onClick={() => xemChiTiet(record.id)} /></Tooltip>
+          <Tooltip title="Tải & In PDF"><Button type="text" style={{color: '#722ed1'}} icon={<PrinterOutlined />} onClick={() => handleDownloadPdf(record.id)} /></Tooltip>
+          <Tooltip title="Gửi Mail Kèm Biên Nhận"><Button type="text" style={{color: '#faad14'}} icon={<MailOutlined />} onClick={() => handleSendEmail(record.id)} /></Tooltip>
         </Space>
       )
     }
@@ -91,12 +111,12 @@ const PhieuThuPage = () => {
         <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/phieu-thu/tao-moi')}>Tạo Phiếu Thu</Button>
       </div>
 
+      {/* 🚀 ĐÃ KHÔI PHỤC: Khối Filter Tìm Kiếm, Lọc Khách Hàng */}
       <Space style={{ marginBottom: 16 }} wrap>
-        {/* 🚀 FIX LỖI TÌM KIẾM KHÁCH HÀNG Ở ĐÂY NỮA */}
         <Select 
           showSearch 
-          placeholder="Khách hàng" 
-          style={{ width: 200 }} 
+          placeholder="Lọc theo Khách hàng..." 
+          style={{ width: 250 }} 
           allowClear 
           onChange={setKhachHangId} 
           optionFilterProp="label" 
@@ -112,7 +132,7 @@ const PhieuThuPage = () => {
 
       <Table columns={columns} dataSource={data} rowKey="id" loading={loading} pagination={{ current: page, pageSize: limit, total, onChange }} bordered />
 
-      {/* Modal hiển thị chi tiết Phiếu Thu */}
+      {/* Modal Chi Tiết (Đã fix so_tien_nhan_duoc) */}
       <Modal title={`Chi tiết Phiếu thu PT-${selectedPhieu?.id}`} open={detailModalVisible} onCancel={() => setDetailModalVisible(false)} footer={<Button onClick={() => setDetailModalVisible(false)}>Đóng</Button>} width={600}>
         {selectedPhieu && (
           <div>
@@ -123,7 +143,8 @@ const PhieuThuPage = () => {
               <Text type="secondary">Tham chiếu:</Text> <Text>{selectedPhieu.so_tham_chieu || 'N/A'}</Text>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-              <Text type="secondary">Tổng tiền:</Text> <CurrencyText value={selectedPhieu.tong_so_tien} style={{ fontSize: 18, color: '#52c41a' }}/>
+              <Text type="secondary">Tổng tiền:</Text> 
+              <CurrencyText value={selectedPhieu.so_tien_nhan_duoc} style={{ fontSize: 18, color: '#52c41a' }}/>
             </div>
             
             <Text strong>Chi tiết phân bổ vào vận đơn:</Text>

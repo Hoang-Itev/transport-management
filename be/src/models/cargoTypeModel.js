@@ -1,17 +1,19 @@
+// src/models/cargoTypeModel.js
 const db = require('../config/database');
 
 const CargoType = {
-  // Lấy danh sách có phân trang và tìm kiếm
   findAll: async ({ page = 1, limit = 10, search = '', isActive }) => {
     const offset = (page - 1) * limit;
-    let query = `SELECT * FROM loai_hangs WHERE 1=1`;
+    
+    // FIX: Đã xóa cột created_at ra khỏi câu SELECT
+    let query = `SELECT id, ten_loai, he_so_gia, cau_hinh_thuoc_tinh, is_active FROM loai_hangs WHERE 1=1`;
     let countQuery = `SELECT COUNT(*) as total FROM loai_hangs WHERE 1=1`;
     const params = [];
 
     if (search) {
       const searchPattern = `%${search}%`;
-      query += ` AND ten LIKE ?`;
-      countQuery += ` AND ten LIKE ?`;
+      query += ` AND ten_loai LIKE ?`;
+      countQuery += ` AND ten_loai LIKE ?`;
       params.push(searchPattern);
     }
 
@@ -21,7 +23,8 @@ const CargoType = {
       params.push(isActive === 'true' ? 1 : 0);
     }
 
-    query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    // FIX: Sửa sắp xếp từ created_at thành id
+    query += ` ORDER BY id DESC LIMIT ? OFFSET ?`;
     const finalParams = [...params, Number(limit), Number(offset)];
 
     const [rows] = await db.query(query, finalParams);
@@ -44,31 +47,25 @@ const CargoType = {
   },
 
   create: async (data) => {
-    const { ten, moTa } = data;
+    const { tenLoai, heSoGia, cauHinhThuocTinh } = data;
     const [result] = await db.query(
-      `INSERT INTO loai_hangs (ten, mo_ta) VALUES (?, ?)`,
-      [ten, moTa]
+      `INSERT INTO loai_hangs (ten_loai, he_so_gia, cau_hinh_thuoc_tinh) VALUES (?, ?, ?)`,
+      [tenLoai, heSoGia || 1.00, cauHinhThuocTinh ? JSON.stringify(cauHinhThuocTinh) : null]
     );
     return result.insertId;
   },
 
   update: async (id, data) => {
-    const { ten, moTa } = data;
+    const { tenLoai, heSoGia, cauHinhThuocTinh } = data;
     await db.query(
-      `UPDATE loai_hangs SET ten = ?, mo_ta = ? WHERE id = ?`,
-      [ten, moTa, id]
+      `UPDATE loai_hangs SET ten_loai = ?, he_so_gia = ?, cau_hinh_thuoc_tinh = ? WHERE id = ?`,
+      [tenLoai, heSoGia, cauHinhThuocTinh ? JSON.stringify(cauHinhThuocTinh) : null, id]
     );
     return true;
   },
 
-  // FIX: Vô hiệu hóa dây chuyền Loại hàng -> Bảng giá cước
   softDelete: async (id) => {
-    // 1. Ngưng hoạt động loại hàng
     await db.query(`UPDATE loai_hangs SET is_active = 0 WHERE id = ?`, [id]);
-    
-    // 2. Ngưng hoạt động toàn bộ Bảng giá cước liên quan đến loại hàng này
-    await db.query(`UPDATE bang_gia_cuocs SET is_active = 0 WHERE loai_hang_id = ?`, [id]);
-    
     return true;
   }
 };

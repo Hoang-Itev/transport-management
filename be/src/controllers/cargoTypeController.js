@@ -1,6 +1,6 @@
+// src/controllers/cargoTypeController.js
 const CargoType = require('../models/cargoTypeModel');
 
-// [GET] /api/v1/loai-hang
 const getCargoTypes = async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '', isActive } = req.query;
@@ -11,34 +11,21 @@ const getCargoTypes = async (req, res) => {
   }
 };
 
-// [POST] /api/v1/loai-hang
 const createCargoType = async (req, res) => {
   try {
-    const { ten, moTa } = req.body;
-    if (!ten) {
-      return res.status(400).json({ success: false, message: 'Tên loại hàng không được để trống' });
-    }
-
-    const id = await CargoType.create({ ten, moTa });
+    // FIX: Bổ sung cauHinhThuocTinh (Mảng JSON)
+    const { tenLoai, heSoGia, cauHinhThuocTinh } = req.body;
+    const id = await CargoType.create({ tenLoai, heSoGia: heSoGia || 1.00, cauHinhThuocTinh });
     res.status(201).json({ success: true, message: 'Thêm loại hàng thành công', data: { id } });
   } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ success: false, error: { message: 'Tên loại hàng đã tồn tại' } });
-    }
     res.status(500).json({ success: false, error: { message: error.message } });
   }
 };
 
-// [PUT] /api/v1/loai-hang/:id
 const updateCargoType = async (req, res) => {
   try {
     const { id } = req.params;
-    const cargoType = await CargoType.findById(id);
-
-    if (!cargoType) {
-      return res.status(404).json({ success: false, error: { message: 'Không tìm thấy loại hàng' } });
-    }
-
+    // req.body chứa { tenLoai, heSoGia, cauHinhThuocTinh }
     await CargoType.update(id, req.body);
     res.json({ success: true, message: 'Cập nhật loại hàng thành công' });
   } catch (error) {
@@ -46,19 +33,10 @@ const updateCargoType = async (req, res) => {
   }
 };
 
-// [DELETE] /api/v1/loai-hang/:id
 const deleteCargoType = async (req, res) => {
   try {
-    const { id } = req.params;
-    
-    const cargoType = await CargoType.findById(id);
-    if (!cargoType) {
-      return res.status(404).json({ success: false, error: { message: 'Không tìm thấy loại hàng' } });
-    }
-
-    // Đã thay đổi logic: Tiến hành "softDelete" thẳng tay thay vì block
-    await CargoType.softDelete(id);
-    res.json({ success: true, message: 'Đã vô hiệu hóa loại hàng và các bảng giá liên quan thành công' });
+    await CargoType.softDelete(req.params.id);
+    res.json({ success: true, message: 'Đã vô hiệu hóa loại hàng' });
   } catch (error) {
     res.status(500).json({ success: false, error: { message: error.message } });
   }

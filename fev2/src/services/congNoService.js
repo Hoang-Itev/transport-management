@@ -1,16 +1,19 @@
+// src/services/congNoService.js
 import axiosClient from './axiosClient';
 
 export const congNoService = {
   getList: (params) => axiosClient.get('/cong-no', { params }),
   getDetail: (khachHangId) => axiosClient.get(`/cong-no/${khachHangId}`),
   
+  // 🚀 Thêm API lấy riêng danh sách các dòng Vận đơn chưa thanh toán để đổ vào bảng lập Phiếu Thu
+  getVanDonChuaThanhToan: (khachHangId) => axiosClient.get(`/cong-no/van-don-chua-thanh-toan/${khachHangId}`),
+  
   exportExcel: async (params) => {
     const response = await axiosClient.get('/cong-no/xuat-bao-cao', { 
       params, 
-      responseType: 'blob' // Bắt buộc để tải file PDF/Excel
+      responseType: 'blob' 
     });
     
-    // Logic tự động tải file xuống trình duyệt
     const url = window.URL.createObjectURL(new Blob([response]));
     const link = document.createElement('a');
     link.href = url;
@@ -18,5 +21,6 @@ export const congNoService = {
     document.body.appendChild(link);
     link.click();
     link.remove();
-  }
+  },
+  guiMailNhacNoToanBo: () => axiosClient.post('/cong-no/nhac-no-toan-bo')
 };

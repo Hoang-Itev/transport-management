@@ -5,29 +5,38 @@ const db = require('./config/database');
 
 // 1. IMPORT TẤT CẢ CÁC ROUTES
 const authRoutes = require('./routes/authRoutes');
-const cargoTypeRoutes = require('./routes/cargoTypeRoutes');
-const customerRoutes = require('./routes/customerRoutes');
-const routeRoutes = require('./routes/routeRoutes');
 const userRoutes = require('./routes/userRoutes');
+const customerRoutes = require('./routes/customerRoutes');
+
+// --- CÁC DANH MỤC (MASTER DATA) ---
+const cargoTypeRoutes = require('./routes/cargoTypeRoutes');
+const vehicleTypeRoutes = require('./routes/vehicleTypeRoutes');
+const surchargeRoutes = require('./routes/surchargeRoutes');
+const unitTypeRoutes = require('./routes/unitTypeRoutes'); // 🆕 Đơn vị tính
+
+// --- CẤU HÌNH & BẢNG GIÁ ---
+const sysParamRoutes = require('./routes/sysParamRoutes');
 const pricingRoutes = require('./routes/pricingRoutes');
+
+// --- LÕI NGHIỆP VỤ ---
 const quotationRoutes = require('./routes/quotationRoutes');
-const waybillRoutes = require('./routes/waybillRoutes'); // 🆕 Thêm import Vận đơn
-const receipts = require('./routes/receiptRoutes');
-const congNoRoutes = require('./routes/congNoRoutes');  // thêm dòng này cùng chỗ với các import khác
+const waybillRoutes = require('./routes/waybillRoutes'); 
+const receiptRoutes = require('./routes/receiptRoutes');
+const congNoRoutes = require('./routes/congNoRoutes');  
 const dashboardRoutes = require('./routes/dashboardRoutes');
 
-require('./cronjobs/debtReminder'); // Kích hoạt hệ thống chạy ngầm
+const aiChatRoutes = require('./routes/aiChatRoutes');
 
+// Kích hoạt hệ thống chạy ngầm
+// require('./cronjobs/debtReminder'); 
 
 const app = express();
 
 // --- MIDDLEWARES ---
 app.use(cors());
-app.use(express.json()); // Để server đọc được dữ liệu JSON gửi lên
+app.use(express.json()); // Để server đọc được dữ liệu JSON
 
-// --- ROUTES (PHẢI NẰM Ở ĐÂY, TRƯỚC KHI START SERVER) ---
-
-// Route test kết nối
+// Route test kết nối DB
 app.get('/test-db', async (req, res) => {
   try {
     const [rows] = await db.query('SELECT 1 + 1 AS result');
@@ -37,24 +46,36 @@ app.get('/test-db', async (req, res) => {
   }
 });
 
-// Đăng ký các route nghiệp vụ
+// =========================================================================
+// 2. ĐĂNG KÝ CÁC ROUTE (ĐÃ QUY HOẠCH LẠI CHUẨN RESTFUL)
+// =========================================================================
+
+// Nhóm 1: Hệ thống & Đối tác
 app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/khach-hang', customerRoutes);
-app.use('/api/v1/loai-hang', cargoTypeRoutes);
-app.use('/api/v1/tuyen-duong', routeRoutes);
 app.use('/api/v1/nguoi-dung', userRoutes);
-app.use('/api/v1/bang-gia', pricingRoutes);
+app.use('/api/v1/khach-hang', customerRoutes);
+
+// Nhóm 2: Master Data (Gom hết vào prefix /danh-muc/)
+app.use('/api/v1/danh-muc/loai-hang', cargoTypeRoutes);   // Đã dời vào danh mục
+app.use('/api/v1/danh-muc/loai-xe', vehicleTypeRoutes);   
+app.use('/api/v1/danh-muc/phu-phi', surchargeRoutes);     
+app.use('/api/v1/danh-muc/don-vi-tinh', unitTypeRoutes);  // 🆕 Chuẩn hóa tên
+
+// Nhóm 3: Cấu hình & Bảng giá
+app.use('/api/v1/tham-so', sysParamRoutes);               
+app.use('/api/v1/bang-gia', pricingRoutes); // 👈 Chỉ cần đúng 1 dòng này là nó bao trọn gói LTL, FTL, Chiết khấu, Phụ phí.
+
+// Nhóm 4: Lõi nghiệp vụ (Giao dịch)
 app.use('/api/v1/bao-gia', quotationRoutes);
-app.use('/api/v1/van-don', waybillRoutes); // 🆕 Đăng ký URL cho Vận đơn
-app.use('/api/v1/phieu-thu', receipts);
-app.use('/api/v1/cong-no', congNoRoutes);  // thêm dòng này cùng chỗ với các app.use khác
+app.use('/api/v1/van-don', waybillRoutes); 
+app.use('/api/v1/phieu-thu', receiptRoutes);
+app.use('/api/v1/cong-no', congNoRoutes);  
 app.use('/api/v1/dashboard', dashboardRoutes);
 
+app.use('/api/v1/ai-chat', aiChatRoutes);
 
-
-
-// --- START SERVER (PHẢI NẰM DƯỚI CÙNG) ---
+// --- START SERVER ---
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server đang chạy tại: http://localhost:${PORT}`);
+  console.log(`🚀 Server Logistics ERP đang chạy tại: http://localhost:${PORT}`);
 });

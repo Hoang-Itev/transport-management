@@ -27,15 +27,17 @@ const getCustomerById = async (req, res) => {
       return res.status(404).json({ success: false, error: { message: 'Không tìm thấy khách hàng' } });
     }
 
-    // Tính toán thêm 2 trường nghiệp vụ
-    const congNoHienTai = await Customer.getCongNoHienTai(id);
-    const conLaiDuocPhepNo = customer.han_muc_cong_no - congNoHienTai;
+    // FIX CHUẨN V3: Không cần Query tính nợ phức tạp nữa, bốc thẳng từ Database ra
+    const hanMucNo = Number(customer.han_muc_no_toi_da) || 0;
+    const noHienTai = Number(customer.tong_no_hien_tai) || 0;
+    const conLaiDuocPhepNo = hanMucNo > 0 ? (hanMucNo - noHienTai) : 0;
 
     res.json({
       success: true,
       data: {
         ...customer,
-        congNoHienTai,
+        han_muc_no_toi_da: hanMucNo,
+        tong_no_hien_tai: noHienTai,
         conLaiDuocPhepNo
       }
     });
@@ -76,29 +78,24 @@ const updateCustomer = async (req, res) => {
 };
 
 // [DELETE] /api/v1/khach-hang/:id
+// Thao tác sửa trực tiếp tại hàm deleteCustomer trong file customerController.js
 const deleteCustomer = async (req, res) => {
   try {
     const { id } = req.params;
     
-    // 1. Kiểm tra tồn tại
     const customer = await Customer.findById(id);
-    if (!customer) {
-      return res.status(404).json({ success: false, error: { message: 'Không tìm thấy khách hàng' } });
-    }
+    if (!customer) return res.status(404).json({ success: false, error: { message: 'Không tìm thấy khách hàng' } });
 
-    // 2. Nghiệp vụ: Chặn xóa nếu còn Vận đơn chưa thanh toán
-    const hasUnpaid = await Customer.checkUnpaidWaybills(id);
-    if (hasUnpaid) {
+    // FIX CHUẨN V3: Thay thế hàm checkUnpaidWaybills bằng đoạn check nợ thực tế dựa trên cột tong_no_hien_tai
+    if (Number(customer.tong_no_hien_tai) > 0) {
       return res.status(422).json({ 
         success: false, 
-        error: { code: 'KHACH_HANG_CO_DU_LIEU', message: 'Không thể xóa! Khách hàng này còn vận đơn chưa thanh toán (PAID).' } 
+        error: { code: 'KHACH_HANG_CO_DU_LIEU', message: 'Không thể xóa! Khách hàng này hiện vẫn còn dư nợ công nợ chưa hoàn thành.' } 
       });
     }
 
-    // 3. Thực hiện Soft Delete
     await Customer.softDelete(id);
     res.json({ success: true, message: 'Đã vô hiệu hóa khách hàng thành công' });
-
   } catch (error) {
     res.status(500).json({ success: false, error: { message: error.message } });
   }
