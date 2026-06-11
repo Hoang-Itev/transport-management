@@ -21,7 +21,7 @@ const VanDonDetail = () => {
   const [loading, setLoading] = useState(true);
   const [savingActuals, setSavingActuals] = useState(false);
   const [data, setData] = useState(null);
-  
+
   const [routeStatus, setRouteStatus] = useState('');
   const [actualsForm] = Form.useForm();
 
@@ -59,12 +59,12 @@ const VanDonDetail = () => {
           };
         });
 
-        actualsForm.setFieldsValue({ 
+        actualsForm.setFieldsValue({
           nguoi_gui_ten: d.nguoi_gui_ten_thuc_te, nguoi_gui_sdt: d.nguoi_gui_sdt_thuc_te,
           nguoi_nhan_ten: d.nguoi_nhan_ten_thuc_te, nguoi_nhan_sdt: d.nguoi_nhan_sdt_thuc_te,
           diem_lay_chi_tiet: d.diem_lay_chi_tiet, diem_giao_chi_tiet: d.diem_giao_chi_tiet,
-          hinh_thuc_thanh_toan: d.hinh_thuc_thanh_toan, tien_cod_thu_ho: d.tien_cod_thu_ho,
-          item_actuals: itemActualsMap 
+          hinh_thuc_thanh_toan: d.hinh_thuc_thanh_toan || (d.loai_khach === 'B2C_VANG_LAI' ? 'TRA_TRUOC' : 'GHI_NO'), tien_cod_thu_ho: d.tien_cod_thu_ho,
+          item_actuals: itemActualsMap
         });
       }
     } catch {
@@ -102,7 +102,7 @@ const VanDonDetail = () => {
       setSavingActuals(true);
       const itemActuals = Object.entries(vals.item_actuals || {}).map(([itemId, v]) => ({ booking_item_id: Number(itemId), ...v }));
       const tongTrongLuong = itemActuals.reduce((s, i) => s + (Number(i.trong_luong_thuc_te) || 0), 0);
-      
+
       // Gửi CẢ ĐỊA CHỈ & KHOẢNG CÁCH MỚI xuống Backend
       await vanDonService.chotSoLieu(id, {
         trongLuongChot: tongTrongLuong, kichThuocChot: itemActuals,
@@ -122,7 +122,7 @@ const VanDonDetail = () => {
 
   const isCancelled = data.trang_thai_van_chuyen === 'CANCELLED';
   const isPaid = data.trang_thai_thanh_toan !== 'UNPAID';
-  const canUpdateActuals = !isCancelled && !isPaid; 
+  const canUpdateActuals = !isCancelled && !isPaid;
   const daThu = (data.lich_su_thu || []).reduce((s, pt) => s + Number(pt.so_tien_phan_bo), 0);
   const conLai = Math.max(0, Number(data.so_tien_chot_cuoi) - daThu);
 
@@ -175,20 +175,67 @@ const VanDonDetail = () => {
                 (data.items || []).map((item, idx) => (
                   <div key={item.id} style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 6, padding: '12px', marginBottom: 10 }}>
                     <Text strong>{idx + 1}. {item.ten_hang} ({item.so_luong} {item.ten_dvt})</Text>
-                    <Row gutter={[8, 0]} align="bottom" style={{ marginTop: 10 }}>
-                      <Col span={6}>
+
+                    {/* 🚀 1. KHỐI MÀU VÀNG: LOGIC SO SÁNH QUY ĐỔI (Chỉ hiện khi nhập đủ 3 chiều) */}
+                    <Form.Item noStyle dependencies={[['item_actuals', item.id, 'trong_luong_thuc_te'], ['item_actuals', item.id, 'dai_cm'], ['item_actuals', item.id, 'rong_cm'], ['item_actuals', item.id, 'cao_cm']]}>
+                      {({ getFieldValue }) => {
+                        const actualKg = getFieldValue(['item_actuals', item.id, 'trong_luong_thuc_te']) || 0;
+                        const d = getFieldValue(['item_actuals', item.id, 'dai_cm']) || 0;
+                        const r = getFieldValue(['item_actuals', item.id, 'rong_cm']) || 0;
+                        const c = getFieldValue(['item_actuals', item.id, 'cao_cm']) || 0;
+                        
+                        // Ẩn nếu chưa nhập đủ chiều dài, rộng, cao
+                        if (!d || !r || !c) return null; 
+
+                        const volKg = (d * r * c) / 5000 * item.so_luong; // Công thức chia 5000
+                        const cw = Math.max(actualKg, volKg);
+
+                        return (
+                          <div style={{ fontSize: 13, color: '#555', marginTop: 10, padding: '8px 12px', background: '#fffbe6', border: '1px dashed #ffe58f', borderRadius: 6 }}>
+                            💡 <b>Lưu ý tính cước:</b> Thể tích quy đổi <b>{volKg.toFixed(1)} kg</b> vs Cân thực tế <b>{actualKg.toFixed(1)} kg</b> <br/>
+                            ➔ Hệ thống tự động chốt mức cao hơn: <Text type="danger" strong>{cw.toFixed(1)} kg</Text> (Trọng lượng tính cước)
+                          </div>
+                        );
+                      }}
+                    </Form.Item>
+
+                    {/* 🚀 2. KHỐI NHẬP LIỆU LINH ĐỘNG THEO TỪNG LOẠI HÀNG */}
+                    <Row gutter={[8, 8]} align="bottom" style={{ marginTop: 10 }}>
+                      {/* Cân thực (Luôn luôn có) */}
+                      <Col span={item.cau_hinh_thuoc_tinh?.includes('dai_cm') ? 6 : 12}>
                         <Form.Item name={['item_actuals', item.id, 'trong_luong_thuc_te']} label="Cân thực (kg)" style={{ marginBottom: 0 }} rules={[{ required: true }]}>
                           <InputNumber style={{ width: '100%' }} min={0.01} step={0.1} disabled={!canUpdateActuals} />
                         </Form.Item>
                       </Col>
+
+                      {/* Nếu là hàng cồng kềnh (Hiện Dài, Rộng, Cao) */}
                       {item.cau_hinh_thuoc_tinh?.includes('dai_cm') && (
-                          <Col span={14}>
-                            <Space.Compact style={{ width: '100%' }}>
-                              <Form.Item name={['item_actuals', item.id, 'dai_cm']} noStyle><InputNumber placeholder="Dài" disabled={!canUpdateActuals} /></Form.Item>
-                              <Form.Item name={['item_actuals', item.id, 'rong_cm']} noStyle><InputNumber placeholder="Rộng" disabled={!canUpdateActuals} /></Form.Item>
-                              <Form.Item name={['item_actuals', item.id, 'cao_cm']} noStyle><InputNumber placeholder="Cao" disabled={!canUpdateActuals} /></Form.Item>
-                            </Space.Compact>
+                        <>
+                          <Col span={6}>
+                            <Form.Item name={['item_actuals', item.id, 'dai_cm']} label="Dài (cm)" style={{ marginBottom: 0 }}>
+                              <InputNumber style={{ width: '100%' }} min={0} disabled={!canUpdateActuals} />
+                            </Form.Item>
                           </Col>
+                          <Col span={6}>
+                            <Form.Item name={['item_actuals', item.id, 'rong_cm']} label="Rộng (cm)" style={{ marginBottom: 0 }}>
+                              <InputNumber style={{ width: '100%' }} min={0} disabled={!canUpdateActuals} />
+                            </Form.Item>
+                          </Col>
+                          <Col span={6}>
+                            <Form.Item name={['item_actuals', item.id, 'cao_cm']} label="Cao (cm)" style={{ marginBottom: 0 }}>
+                              <InputNumber style={{ width: '100%' }} min={0} disabled={!canUpdateActuals} />
+                            </Form.Item>
+                          </Col>
+                        </>
+                      )}
+
+                      {/* Nếu là hàng lạnh (Hiện Nhiệt độ) */}
+                      {item.cau_hinh_thuoc_tinh?.includes('nhiet_do_c') && (
+                        <Col span={6}>
+                          <Form.Item name={['item_actuals', item.id, 'nhiet_do_c']} label="Nhiệt độ (°C)" style={{ marginBottom: 0 }}>
+                            <InputNumber style={{ width: '100%' }} disabled={!canUpdateActuals} />
+                          </Form.Item>
+                        </Col>
                       )}
                     </Row>
                   </div>
@@ -199,9 +246,9 @@ const VanDonDetail = () => {
             <Card size="small" bordered={false} style={{ borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>🗺️ Bản đồ Lộ trình (Kéo thả Maker để đổi địa chỉ)</Text>}>
               {/* 🚀 BẢN ĐỒ NẰM DƯỚI CÙNG VÀ CỰC KỲ RỘNG RÃI */}
               <div style={{ width: '100%', height: '550px', backgroundColor: '#fafafa', borderRadius: '8px', overflow: 'hidden' }}>
-                <GoongMapRoute 
-                  originAddress={diemLay} 
-                  destinationAddress={diemGiao} 
+                <GoongMapRoute
+                  originAddress={diemLay}
+                  destinationAddress={diemGiao}
                   onAddressChange={(type, newAddr) => { type === 'origin' ? setDiemLay(newAddr) : setDiemGiao(newAddr) }}
                   onRouteCalculated={(newKm) => setKhoangCach(newKm)} // Nhận Km mới
                 />
@@ -212,7 +259,7 @@ const VanDonDetail = () => {
           {/* ════════ CỘT PHẢI (TRẠNG THÁI & TÀI CHÍNH) ════════ */}
           <Col xs={24} lg={9}>
             <div style={{ position: 'sticky', top: 20 }}>
-              
+
               <Card size="small" bordered={false} style={{ marginBottom: 12, borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>🚚 Trạng thái Xe</Text>}>
                 <Row gutter={8}>
                   <Col span={16}>
@@ -230,7 +277,7 @@ const VanDonDetail = () => {
                 <Row gutter={8}>
                   <Col span={12}>
                     <Form.Item name="hinh_thuc_thanh_toan" label="Thu tiền" style={{ marginBottom: 10 }}>
-                      <Select disabled={!canUpdateActuals || data.loai_khach === 'B2C_VANG_LAI'}>
+                      <Select disabled={!canUpdateActuals}>
                         <Option value="TRA_TRUOC">Trả Trước</Option><Option value="COD_THU_HO">Thu hộ (COD)</Option><Option value="GHI_NO">Công Nợ B2B</Option>
                       </Select>
                     </Form.Item>
@@ -257,7 +304,7 @@ const VanDonDetail = () => {
                   <Button block type="primary" size="large" icon={<SaveOutlined />} onClick={handleUpdateActuals} loading={savingActuals} disabled={!canUpdateActuals} style={{ marginBottom: 10 }}>Lưu Thay Đổi & Chốt Phí</Button>
                   <Row gutter={8}>
                     <Col span={12}><Button block icon={<PrinterOutlined />} onClick={() => vanDonService.exportPdf?.(id)} style={{ color: '#722ed1' }}>In PDF</Button></Col>
-                    <Col span={12}><Button block icon={<MessageOutlined style={{ color: '#1890ff' }}/>} onClick={() => window.open('https://chat.zalo.me', '_blank')}>Gửi Zalo</Button></Col>
+                    <Col span={12}><Button block icon={<MessageOutlined style={{ color: '#1890ff' }} />} onClick={() => window.open('https://chat.zalo.me', '_blank')}>Gửi Zalo</Button></Col>
                   </Row>
                   <Button block icon={<MailOutlined />} onClick={async () => { message.loading({ content: 'Đang gửi email...', key: 'email_vd' }); try { await vanDonService.sendEmail(id); message.success({ content: 'Đã gửi Email thành công!', key: 'email_vd' }); } catch { message.error({ content: 'Gửi Email thất bại', key: 'email_vd' }); } }} style={{ marginTop: 10 }}>Gửi Email Cho Khách</Button>
                 </div>

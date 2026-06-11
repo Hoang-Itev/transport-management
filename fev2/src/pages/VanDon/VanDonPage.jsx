@@ -63,13 +63,18 @@ const VanDonPage = () => {
   const handleOneClickCreate = async (booking) => {
     try {
       message.loading({ content: 'Đang khởi tạo Vận đơn...', key: 'create_vd' });
+      
+      // 🚀 CHỈ THÊM 2 DÒNG NÀY ĐỂ TÌM LOẠI KHÁCH:
+      const khach = khachHangList.find(k => k.id === booking.khach_hang_id);
+      const isB2C = booking.loai_khach === 'B2C_VANG_LAI' || khach?.loai_khach === 'B2C_VANG_LAI';
+
       const payload = {
         bookingId: booking.id || booking.booking_id,
         nguoiGuiTen: booking.nguoi_gui_ten,
         nguoiGuiSdt: booking.nguoi_gui_sdt,
         nguoiNhanTen: booking.nguoi_nhan_ten,
         nguoiNhanSdt: booking.nguoi_nhan_sdt,
-        hinhThucThanhToan: booking.loai_khach === 'B2C_VANG_LAI' ? 'TRA_TRUOC' : 'GHI_NO',
+        hinhThucThanhToan: isB2C ? 'TRA_TRUOC' : 'GHI_NO', // 👈 Sửa lại dòng này
         tienCodThuHo: 0
       };
       
@@ -87,7 +92,39 @@ const VanDonPage = () => {
     { title: 'Khách hàng', dataIndex: 'ten_cong_ty', render: (val, r) => <><Text strong>{val}</Text><br/><Text type="secondary" style={{fontSize: 11}}>Tạo bởi: ID {r.nguoi_tao_id}</Text></> }, 
     { title: 'Giá trị chốt', dataIndex: 'so_tien_chot_cuoi', align: 'right', render: (val) => <CurrencyText value={val} style={{color: '#cf1322', fontWeight: 'bold'}} /> },
     { title: 'Trạng thái VC', dataIndex: 'trang_thai_van_chuyen', align: 'center', render: (val) => <StatusTag status={val} /> },
-    { title: 'Thanh toán', dataIndex: 'trang_thai_thanh_toan', align: 'center', render: (val) => <Tag color={val === 'PAID' ? 'green' : val === 'PARTIAL' ? 'orange' : 'default'}>{val}</Tag> },
+    { 
+  title: 'Thanh toán', 
+  align: 'center', 
+  render: (_, record) => {
+    // 1. Dịch Hình thức thanh toán
+    const methodMap = {
+      'TRA_TRUOC': 'Trả Trước',
+      'COD_THU_HO': 'Thu hộ (COD)',
+      'GHI_NO': 'Công Nợ'
+    };
+    
+    // 2. Dịch Trạng thái thu tiền
+    const statusMap = {
+      'UNPAID': { text: 'Chưa thu', color: 'default' },
+      'PARTIAL': { text: 'Thu 1 phần', color: 'orange' },
+      'PAID': { text: 'Đã thu đủ', color: 'green' }
+    };
+
+    const methodText = methodMap[record.hinh_thuc_thanh_toan] || record.hinh_thuc_thanh_toan;
+    const statusObj = statusMap[record.trang_thai_thanh_toan] || { text: record.trang_thai_thanh_toan, color: 'default' };
+
+    return (
+      <div>
+        <div style={{ fontSize: 12, color: '#555', marginBottom: 4, fontWeight: 500 }}>
+          {methodText}
+        </div>
+        <Tag color={statusObj.color} style={{ margin: 0 }}>
+          {statusObj.text}
+        </Tag>
+      </div>
+    );
+  } 
+},
     { title: 'Thao tác', align: 'center', render: (_, record) => (
         <Tooltip title="Vào Bảng Điều Khiển"><Button type="primary" shape="circle" icon={<EyeOutlined />} onClick={() => navigate(`/van-don/${record.ma_van_don}`)} /></Tooltip>
       )
