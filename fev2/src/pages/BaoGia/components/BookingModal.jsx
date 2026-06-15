@@ -40,7 +40,7 @@ const BookingModal = ({ visible, onCancel, onSave, mode, masterData, editingData
     const [coords, setCoords] = useState({ origin: null, dest: null });
     const [loadingKm, setLoadingKm] = useState(false);
     const [localPhuPhis, setLocalPhuPhis] = useState([]);
-    
+
     // Quản lý dữ liệu thay đổi realtime trên form
     const watchedValues = Form.useWatch((values) => values, form);
     const formValues = watchedValues || form.getFieldsValue(true) || {};
@@ -50,7 +50,7 @@ const BookingModal = ({ visible, onCancel, onSave, mode, masterData, editingData
     const loaiXeWatcher = formValues.loaiXeId;
 
     const diemLayWatcher = formValues.diemLayChiTiet;
-const diemGiaoWatcher = formValues.diemGiaoChiTiet;
+    const diemGiaoWatcher = formValues.diemGiaoChiTiet;
 
     // 🚀 HÀM PHÂN GIẢI CỨU CÁNH CHO AI: Tự động đổi Chữ thành Tọa độ ngầm
     const autoResolveCoordsFromText = async (diemLayText, diemGiaoText) => {
@@ -73,8 +73,8 @@ const diemGiaoWatcher = formValues.diemGiaoChiTiet;
             }
 
             if (originLoc && destLoc) {
-    setCoords({ origin: originLoc, dest: destLoc });
-}
+                setCoords({ origin: originLoc, dest: destLoc });
+            }
         } catch (e) {
             console.error("Lỗi phân giải tọa độ AI:", e);
         } finally {
@@ -84,11 +84,11 @@ const diemGiaoWatcher = formValues.diemGiaoChiTiet;
 
     // 👇 useEffect watcher - giờ khai báo SAU hàm nên dùng được
     useEffect(() => {
-    const soKm = form.getFieldValue('soKmApi');
-    if (!editingData && diemLayWatcher && diemGiaoWatcher && !soKm && !coords.origin && !coords.dest) {
-        autoResolveCoordsFromText(diemLayWatcher, diemGiaoWatcher);
-    }
-}, [diemLayWatcher, diemGiaoWatcher]);
+        const soKm = form.getFieldValue('soKmApi');
+        if (!editingData && diemLayWatcher && diemGiaoWatcher && !soKm && !coords.origin && !coords.dest) {
+            autoResolveCoordsFromText(diemLayWatcher, diemGiaoWatcher);
+        }
+    }, [diemLayWatcher, diemGiaoWatcher]);
 
     useEffect(() => {
         if (visible) {
@@ -96,9 +96,9 @@ const diemGiaoWatcher = formValues.diemGiaoChiTiet;
                 form.setFieldsValue(editingData);
                 setLocalPhuPhis(editingData.phuPhis || editingData.phuPhiCoDinh || []);
                 if (editingData.diemLayChiTiet && editingData.diemGiaoChiTiet && !editingData.soKmApi) {
-    autoResolveCoordsFromText(editingData.diemLayChiTiet, editingData.diemGiaoChiTiet);
-}
-             } else {
+                    autoResolveCoordsFromText(editingData.diemLayChiTiet, editingData.diemGiaoChiTiet);
+                }
+            } else {
                 form.resetFields();
                 setLocalPhuPhis([]);
                 form.setFieldsValue({ items: [{ soLuong: 1 }] });
@@ -151,12 +151,12 @@ const diemGiaoWatcher = formValues.diemGiaoChiTiet;
         if (mode === 'LTL' && kmWatcher > 0 && totalCW > 0) {
             const bangGia = masterData.bangGiaLTLs?.find(p => Number(p.moc_tu_km) <= kmWatcher && Number(p.moc_den_km) >= kmWatcher);
             const donGiaGoc = bangGia?.don_gia_goc_kg || 0;
-            const minCharge = bangGia?.cuoc_toi_thieu || 0; 
-            
+            const minCharge = bangGia?.cuoc_toi_thieu || 0;
+
             const heSoChietKhau = masterData.chietKhauLTLs?.find(d => Number(d.moc_tu_kg) <= totalCW && Number(d.moc_den_kg) >= totalCW)?.he_so_chiet_khau || 1.0;
-            
+
             itemsWatcher.forEach(item => {
-                if(!item) return;
+                if (!item) return;
                 const heSoGia = masterData.loaiHangs?.find(l => Number(l.id) === Number(item.loaiHangId))?.he_so_gia || 1.0;
                 let quyDoi = item.thuocTinhChiTiet?.dai_cm ? (Number(item.thuocTinhChiTiet.dai_cm) * Number(item.thuocTinhChiTiet.rong_cm) * Number(item.thuocTinhChiTiet.cao_cm)) / 5000 * (Number(item.soLuong) || 1) : 0;
                 const cw = Math.max(Number(item.trongLuongThucTe) || 0, quyDoi);
@@ -169,7 +169,7 @@ const diemGiaoWatcher = formValues.diemGiaoChiTiet;
         } else if (mode === 'FTL' && kmWatcher > 0 && loaiXeWatcher) {
             const ftlRows = masterData.bangGiaFTLs?.filter(x => x.loai_xe_id === loaiXeWatcher) || [];
             ftlRows.sort((a, b) => Number(a.moc_tu_km) - Number(b.moc_tu_km));
-            
+
             let kmToCalc = kmWatcher;
             for (const tier of ftlRows) {
                 if (kmToCalc > Number(tier.moc_den_km)) {
@@ -222,7 +222,8 @@ const diemGiaoWatcher = formValues.diemGiaoChiTiet;
     };
 
     return (
-        <Modal width={950} title={mode === 'LTL' ? "📦 CHI TIẾT HÀNG GHÉP (LTL)" : "🚚 CHI TIẾT BAO XE (FTL)"} open={visible} onCancel={onCancel} onOk={handleSave} okText="Lưu Chuyến Đưa Vào Báo Giá" destroyOnClose>
+        // Đổi thành thế này:
+        <Modal width={950} title={mode === 'LTL' ? "📦 CHI TIẾT HÀNG GHÉP (LTL)" : "🚚 CHI TIẾT BAO XE (FTL)"} open={visible} onCancel={onCancel} onOk={handleSave} okText="Lưu Chuyến Đưa Vào Báo Giá" destroyOnHidden>
             <Form form={form} layout="vertical">
                 <Row gutter={16}>
                     <Col span={8}><Form.Item name="nguoiGuiTen" label="Người gửi (Tùy chọn)"><Input placeholder="Tên / Công ty" /></Form.Item></Col>
@@ -235,7 +236,7 @@ const diemGiaoWatcher = formValues.diemGiaoChiTiet;
                     <Col span={12}><Form.Item name="diemGiaoChiTiet" label="Địa chỉ Giao hàng" rules={[{ required: true }]}><GoongAutocomplete placeholder="Nhập địa chỉ giao..." onSelectLocation={(loc) => setCoords(prev => ({ ...prev, dest: loc }))} /></Form.Item></Col>
                 </Row>
                 <Row gutter={16}>
-                    <Col span={6}><Form.Item name="soKmApi" label="Khoảng cách (Km)" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} disabled={loadingKm} addonAfter={loadingKm ? "..." : "Km"} /></Form.Item></Col>
+                    <Col span={6}><Form.Item name="soKmApi" label="Khoảng cách (Km)" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} disabled={loadingKm} /></Form.Item></Col>
                     {mode === 'FTL' && (
                         <Col span={8}><Form.Item name="loaiXeId" label="Loại Xe Bao" rules={[{ required: true }]}><Select showSearch filterOption={(input, option) => (option?.children ?? '').toString().toLowerCase().includes(input.toLowerCase())}>{masterData.loaiXes?.map(x => <Option key={x.id} value={x.id}>{x.ten_hien_thi}</Option>)}</Select></Form.Item></Col>
                     )}
@@ -249,11 +250,16 @@ const diemGiaoWatcher = formValues.diemGiaoChiTiet;
                             {fields.map(({ key, name, ...restField }) => {
                                 const currentItem = itemsWatcher[name] || {};
                                 const lhSelected = masterData.loaiHangs?.find(l => l.id === currentItem.loaiHangId);
+                                // 🚀 FIX 1: Lấy thêm cấu hình Đơn vị tính
+                                const dvtSelected = masterData.donViTinhs?.find(d => d.id === currentItem.donViTinhId);
+                                const isRequireDim = dvtSelected?.yeu_cau_kich_thuoc === 1 || dvtSelected?.yeu_cau_kich_thuoc === true;
+
                                 let attrConfig = [];
                                 try { attrConfig = typeof lhSelected?.cau_hinh_thuoc_tinh === 'string' ? JSON.parse(lhSelected.cau_hinh_thuoc_tinh) : (lhSelected?.cau_hinh_thuoc_tinh || []); } catch (e) { }
 
                                 let quyDoi = 0;
-                                if (attrConfig.includes('dai_cm')) {
+                                // 🚀 FIX 2: Xét điều kiện isRequireDim thay vì attrConfig.includes('dai_cm')
+                                if (isRequireDim) {
                                     const d = currentItem.thuocTinhChiTiet?.dai_cm || 0;
                                     const r = currentItem.thuocTinhChiTiet?.rong_cm || 0;
                                     const c = currentItem.thuocTinhChiTiet?.cao_cm || 0;
@@ -273,17 +279,24 @@ const diemGiaoWatcher = formValues.diemGiaoChiTiet;
                                             <Col span={4}><Form.Item {...restField} name={[name, 'giaTriKhaiBao']} label="Giá trị (VNĐ)"><InputNumber style={{ width: '100%' }} /></Form.Item></Col>
                                             {fields.length > 1 && <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(name)} style={{ position: 'absolute', top: 5, right: 5 }} />}
                                         </Row>
-                                        {attrConfig.length > 0 && (
+                                        {/* 🚀 FIX 3: Hiển thị form dựa trên Đơn vị tính hoặc Loại hàng */}
+                                        {(attrConfig.length > 0 || isRequireDim) && (
                                             <Row gutter={12}>
-                                                {attrConfig.includes('dai_cm') && (
+                                                {/* Hiển thị Dài/Rộng/Cao nếu Đơn vị tính yêu cầu */}
+                                                {isRequireDim && (
                                                     <>
                                                         <Col span={4}><Form.Item {...restField} name={[name, 'thuocTinhChiTiet', 'dai_cm']} label="Dài (cm)"><InputNumber style={{ width: '100%' }} /></Form.Item></Col>
                                                         <Col span={4}><Form.Item {...restField} name={[name, 'thuocTinhChiTiet', 'rong_cm']} label="Rộng (cm)"><InputNumber style={{ width: '100%' }} /></Form.Item></Col>
                                                         <Col span={4}><Form.Item {...restField} name={[name, 'thuocTinhChiTiet', 'cao_cm']} label="Cao (cm)"><InputNumber style={{ width: '100%' }} /></Form.Item></Col>
                                                     </>
                                                 )}
+
+                                                {/* Hiển thị Thuộc tính đặc biệt của Loại Hàng */}
                                                 {attrConfig.includes('nhiet_do_c') && <Col span={4}><Form.Item {...restField} name={[name, 'thuocTinhChiTiet', 'nhiet_do_c']} label="Nhiệt độ °C"><InputNumber style={{ width: '100%' }} /></Form.Item></Col>}
-                                                <Col span={8} style={{ display: 'flex', alignItems: 'center', paddingTop: 10 }}>{cw > 0 && <Tag color={quyDoi > thucTe ? "error" : "success"}>Trọng lượng quy đổi: <b>{cw.toFixed(1)} kg</b></Tag>}</Col>
+                                                {attrConfig.includes('loai_bon_chua') && <Col span={4}><Form.Item {...restField} name={[name, 'thuocTinhChiTiet', 'loai_bon_chua']} label="Loại Bồn Chứa"><Input style={{ width: '100%' }} /></Form.Item></Col>}
+
+                                                {/* Ẩn hiện Label Quy Đổi */}
+                                                {isRequireDim && cw > 0 && <Col span={8} style={{ display: 'flex', alignItems: 'center', paddingTop: 10 }}><Tag color={quyDoi > thucTe ? "error" : "success"}>Trọng lượng quy đổi: <b>{cw.toFixed(1)} kg</b></Tag></Col>}
                                             </Row>
                                         )}
                                     </div>
@@ -302,9 +315,14 @@ const diemGiaoWatcher = formValues.diemGiaoChiTiet;
                         const currentPp = localPhuPhis.find(x => x.phuPhiId === pp.id || x.phu_phi_id === pp.id);
                         const isChecked = !!currentPp;
                         let ppPrice = 0;
+
+                        // 🚀 FIX 1: Khai báo biến m ở ngoài cùng để JSX bên dưới có thể đọc được
+                        let m = null;
+
                         if (isChecked) {
                             const refXeId = currentPp.loaiXeId || currentPp.loai_xe_id || null;
-                            const m = masterData.bangGiaPhuPhis?.find(x => x.phu_phi_id === pp.id && (x.loai_xe_id === refXeId || !x.loai_xe_id));
+                            // Gán giá trị cho m
+                            m = masterData.bangGiaPhuPhis?.find(x => x.phu_phi_id === pp.id && (x.loai_xe_id === refXeId || !x.loai_xe_id));
                             if (m) ppPrice = pp.cach_tinh === 'THEO_KG' ? Number(m.don_gia) * preview.totalCW : Number(m.don_gia);
                         }
 
@@ -316,9 +334,12 @@ const diemGiaoWatcher = formValues.diemGiaoChiTiet;
                                             if (e.target.checked) setLocalPhuPhis([...localPhuPhis, { phuPhiId: pp.id, loaiXeId: null }]);
                                             else setLocalPhuPhis(localPhuPhis.filter(x => x.phuPhiId !== pp.id && x.phu_phi_id !== pp.id));
                                         }}><Text strong={isChecked}>{pp.ten_phu_phi}</Text></Checkbox>
-                                        {isChecked && ppPrice > 0 && <Text type="danger" strong>+{ppPrice.toLocaleString('vi-VN')}đ</Text>}
-                                        {isChecked && ppPrice === 0 && <Text type="secondary" style={{ fontSize: 12 }}>Chưa có cấu hình giá</Text>}
+
+                                        {isChecked && m && ppPrice > 0 && <Text type="danger" strong>+{ppPrice.toLocaleString('vi-VN')}đ</Text>}
+                                        {isChecked && m && ppPrice === 0 && <Text type="secondary" style={{ fontSize: 12 }}>Đợi nhập Số Kg...</Text>}
+                                        {isChecked && !m && <Text type="secondary" style={{ fontSize: 12 }}>Chưa cấu hình giá</Text>}
                                     </div>
+
                                     {isChecked && pp.cach_tinh === 'THEO_LOAI_XE' && (
                                         <Select size="small" placeholder="Chọn dòng xe phù hợp..." style={{ width: '100%', marginTop: 8 }} value={currentPp.loaiXeId || currentPp.loai_xe_id || null} onChange={val => setLocalPhuPhis(localPhuPhis.map(x => (x.phuPhiId === pp.id || x.phu_phi_id === pp.id) ? { ...x, phuPhiId: pp.id, loaiXeId: val } : x))}>
                                             {masterData.loaiXes?.map(x => <Option key={x.id} value={x.id}><CarOutlined /> {x.ten_hien_thi}</Option>)}
@@ -333,7 +354,7 @@ const diemGiaoWatcher = formValues.diemGiaoChiTiet;
                 <Alert
                     style={{ marginTop: 20 }}
                     type={preview.total > 0 ? "info" : "warning"}
-                    message={
+                    title={
                         <Space wrap>
                             <Text strong>Tạm tính chi phí tuyến này:</Text>
                             <CurrencyText value={preview.cuocChinh} /> (Cước chính) +

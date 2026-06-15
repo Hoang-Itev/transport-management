@@ -22,7 +22,8 @@ const tinhCuocBooking = (bk, masterData) => {
     let totalCW = 0;
     items.forEach(item => {
         let quyDoi = 0;
-        if (item.thuocTinhChiTiet?.dai_cm) {
+        // 🚀 FIX: Tính thể tích trực tiếp nếu có dữ liệu D/R/C
+        if (item.thuocTinhChiTiet?.dai_cm && item.thuocTinhChiTiet?.rong_cm && item.thuocTinhChiTiet?.cao_cm) {
             quyDoi = (Number(item.thuocTinhChiTiet.dai_cm) * Number(item.thuocTinhChiTiet.rong_cm) * Number(item.thuocTinhChiTiet.cao_cm)) / 5000 * (Number(item.soLuong) || 1);
         }
         totalCW += Math.max(Number(item.trongLuongThucTe) || 0, quyDoi);
@@ -34,10 +35,14 @@ const tinhCuocBooking = (bk, masterData) => {
         const donGiaGoc = bangGia?.don_gia_goc_kg || 0;
         const minCharge = bangGia?.cuoc_toi_thieu || 0;
         const heSoChietKhau = masterData.chietKhauLTLs?.find(d => Number(d.moc_tu_kg) <= totalCW && Number(d.moc_den_kg) >= totalCW)?.he_so_chiet_khau || 1.0;
+        
         items.forEach(item => {
             if (!item) return;
             const heSoGia = masterData.loaiHangs?.find(l => Number(l.id) === Number(item.loaiHangId))?.he_so_gia || 1.0;
-            let quyDoi = item.thuocTinhChiTiet?.dai_cm ? (Number(item.thuocTinhChiTiet.dai_cm) * Number(item.thuocTinhChiTiet.rong_cm) * Number(item.thuocTinhChiTiet.cao_cm)) / 5000 * (Number(item.soLuong) || 1) : 0;
+            // 🚀 FIX: Cập nhật lại cách tính quy đổi
+            let quyDoi = (item.thuocTinhChiTiet?.dai_cm && item.thuocTinhChiTiet?.rong_cm && item.thuocTinhChiTiet?.cao_cm) 
+                        ? (Number(item.thuocTinhChiTiet.dai_cm) * Number(item.thuocTinhChiTiet.rong_cm) * Number(item.thuocTinhChiTiet.cao_cm)) / 5000 * (Number(item.soLuong) || 1) 
+                        : 0;
             const cw = Math.max(Number(item.trongLuongThucTe) || 0, quyDoi);
             cuocChinh += Number(donGiaGoc) * cw * Number(heSoGia) * Number(heSoChietKhau);
         });
@@ -316,7 +321,7 @@ const BaoGiaDetail = () => {
                     <ArrowLeftOutlined onClick={() => navigate('/bao-gia')} style={{ cursor: 'pointer', marginRight: 12, color: '#1890ff' }} />
                     {isEdit ? `Chi Tiết Báo Giá: ${id}` : 'Khởi Tạo Báo Giá'}
                 </Title>
-                {!isEdit && <Button type="primary" style={{ background: '#722ed1' }} icon={<RobotOutlined />} onClick={() => setAiVisible(true)}>Phân Tích AI Zalo</Button>}
+                {!isEdit && <Button type="primary" style={{ background: '#722ed1' }} icon={<RobotOutlined />} onClick={() => setAiVisible(true)}>Phân Tích AI</Button>}
             </div>
 
             <Form form={form} disabled={!isEditable} layout="vertical" onFinish={onFinish} initialValues={{ thueVatPt: 8, ngayHetHan: dayjs().add(7, 'day') }}>

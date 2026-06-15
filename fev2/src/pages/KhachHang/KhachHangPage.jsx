@@ -27,10 +27,18 @@ const KhachHangPage = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await khachHangService.getList({ page, limit, search, isActive, loaiKhach });
+      // Đổi tên biến gửi đi cho khớp 100% với tên cột trong Database MySQL
+      const res = await khachHangService.getList({ 
+        page, 
+        limit, 
+        search, 
+        is_active: isActive,    // <-- Sửa ở đây
+        loai_khach: loaiKhach   // <-- Sửa ở đây
+      });
+
       if (res.success) {
         setData(res.data?.data || res.data || []);
-        setTotal(res.pagination?.total || res.meta?.total || 0);
+        setTotal(res.pagination?.total || res.meta?.total || 0);  
       }
     } catch (error) {
       message.error('Không thể tải danh sách khách hàng');
@@ -111,14 +119,36 @@ const KhachHangPage = () => {
       </div>
 
       <Space style={{ marginBottom: 16 }} wrap>
-        <Input placeholder="Tìm kiếm tên, MST..." prefix={<SearchOutlined />} onBlur={(e) => {setSearch(e.target.value); onChange(1, limit);}} onPressEnter={(e) => {setSearch(e.target.value); onChange(1, limit);}} style={{ width: 250 }} allowClear />
-        <Select placeholder="Phân loại" style={{ width: 180 }} allowClear onChange={(val) => {setLoaiKhach(val); onChange(1, limit);}}>
+        {/* Dùng Input.Search thay vì Input thường */}
+        <Input.Search 
+          placeholder="Tìm kiếm tên, MST..." 
+          allowClear 
+          onSearch={(value) => { 
+            setSearch(value); 
+            onChange(1, limit); // Reset về trang 1 khi search
+          }} 
+          style={{ width: 250 }} 
+        />
+
+        <Select 
+          placeholder="Phân loại" 
+          style={{ width: 180 }} 
+          allowClear 
+          onChange={(val) => { setLoaiKhach(val); onChange(1, limit); }}
+        >
           <Option value="B2B_DOANH_NGHIEP">Doanh nghiệp (B2B)</Option>
           <Option value="B2C_VANG_LAI">Khách lẻ (B2C)</Option>
         </Select>
-        <Select placeholder="Trạng thái" style={{ width: 150 }} allowClear onChange={(val) => {setIsActive(val); onChange(1, limit);}}>
-          <Option value={true}>Đang hợp tác</Option>
-          <Option value={false}>Ngừng hợp tác</Option>
+
+        <Select 
+          placeholder="Trạng thái" 
+          style={{ width: 150 }} 
+          allowClear 
+          onChange={(val) => { setIsActive(val); onChange(1, limit); }}
+        >
+          {/* Đổi value true/false thành "1"/"0" để an toàn khi gửi qua API */}
+          <Option value="1">Đang hợp tác</Option>
+          <Option value="0">Ngừng hợp tác</Option>
         </Select>
       </Space>
 

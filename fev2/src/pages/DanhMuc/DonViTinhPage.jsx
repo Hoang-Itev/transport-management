@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, Typography, Modal, Form, Input, message, Tag } from 'antd';
+import { Card, Table, Button, Space, Typography, Modal, Form, Input, message, Tag, Select } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import { danhMucService } from '../../services/danhMucService';
 
@@ -26,10 +26,15 @@ const DonViTinhPage = () => {
   const openModal = (record = null) => {
     setEditingId(record?.id || null);
     if (record) {
-      form.setFieldsValue({ ten_dvt: record.ten_dvt, is_active: record.is_active });
+      // 🚀 FIX: Ép kiểu boolean cẩn thận cho 2 biến này
+      form.setFieldsValue({ 
+        ten_dvt: record.ten_dvt, 
+        is_active: record.is_active === 1 || record.is_active === true,
+        yeu_cau_kich_thuoc: record.yeu_cau_kich_thuoc === 1 || record.yeu_cau_kich_thuoc === true
+      });
     } else { 
       form.resetFields(); 
-      form.setFieldsValue({ is_active: true });
+      form.setFieldsValue({ is_active: true, yeu_cau_kich_thuoc: false }); // Mặc định thêm mới là false
     }
     setIsModalVisible(true);
   };
@@ -66,6 +71,13 @@ const DonViTinhPage = () => {
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 80, sorter: (a, b) => a.id - b.id },
     { title: 'Tên Đơn vị tính', dataIndex: 'ten_dvt', fontWeight: 'bold', sorter: (a, b) => a.ten_dvt.localeCompare(b.ten_dvt) },
+    // 🚀 FIX: Thêm cột hiển thị Yêu cầu đo kích thước
+    { 
+      title: 'Đo kích thước (D/R/C)', 
+      dataIndex: 'yeu_cau_kich_thuoc', 
+      align: 'center',
+      render: val => (val === 1 || val === true) ? <Tag color="blue">Bắt buộc đo</Tag> : <Tag>Chỉ cân Kg</Tag> 
+    },
     { title: 'Trạng thái', dataIndex: 'is_active', align: 'center', sorter: (a, b) => a.is_active - b.is_active,
       render: val => (val === 1 || val === true) ? <Tag color="success">Hoạt động</Tag> : <Tag color="default">Ngưng</Tag> 
     },
@@ -95,9 +107,25 @@ const DonViTinhPage = () => {
 
       <Table columns={columns} dataSource={filteredData} rowKey="id" loading={loading} pagination={{ pageSize: 10, showSizeChanger: true }} bordered />
       
-      <Modal title={editingId ? "Sửa đơn vị tính" : "Thêm đơn vị tính"} open={isModalVisible} onCancel={() => setIsModalVisible(false)} onOk={() => form.submit()} destroyOnClose>
+        <Modal title={editingId ? "Sửa đơn vị tính" : "Thêm đơn vị tính"} open={isModalVisible} onCancel={() => setIsModalVisible(false)} onOk={() => form.submit()} destroyOnHidden>
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
           <Form.Item name="ten_dvt" label="Tên đơn vị tính (VD: Thùng, Cuộn, Pallet)" rules={[{ required: true, message: 'Vui lòng nhập tên' }]}><Input /></Form.Item>
+          
+          {/* 🚀 FIX: Thêm ô chọn Yêu cầu Kích thước */}
+          <Form.Item name="yeu_cau_kich_thuoc" label="Quy tắc tính thể tích" rules={[{ required: true }]}>
+            <Select>
+              <Select.Option value={true}>Bắt buộc đo Dài - Rộng - Cao (Chia 5000)</Select.Option>
+              <Select.Option value={false}>Chỉ cân Kg thực tế (Không cần đo)</Select.Option>
+            </Select>
+          </Form.Item>
+
+          {/* 🚀 FIX: Thêm ô Trạng thái để sửa lỗi Submit bị mất data is_active */}
+          <Form.Item name="is_active" label="Trạng thái" rules={[{ required: true }]}>
+            <Select>
+              <Select.Option value={true}>Đang hoạt động</Select.Option>
+              <Select.Option value={false}>Ngưng hoạt động</Select.Option>
+            </Select>
+          </Form.Item>
         </Form>
       </Modal>
     </Card>

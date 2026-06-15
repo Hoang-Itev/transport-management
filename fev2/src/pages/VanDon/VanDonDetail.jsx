@@ -10,6 +10,8 @@ import CurrencyText from '../../components/common/CurrencyText';
 import { formatDate } from '../../utils/formatDate';
 import GoongMapRoute from '../../components/common/GoongMapRoute';
 
+import { danhMucService } from '../../services/danhMucService';
+
 const { Title, Text } = Typography;
 const { Option } = Select;
 const REST_KEY = import.meta.env.VITE_GOONG_REST_KEY;
@@ -21,6 +23,7 @@ const VanDonDetail = () => {
   const [loading, setLoading] = useState(true);
   const [savingActuals, setSavingActuals] = useState(false);
   const [data, setData] = useState(null);
+  const [donViTinhs, setDonViTinhs] = useState([]);
 
   const [routeStatus, setRouteStatus] = useState('');
   const [actualsForm] = Form.useForm();
@@ -59,13 +62,15 @@ const VanDonDetail = () => {
           };
         });
 
-        actualsForm.setFieldsValue({
-          nguoi_gui_ten: d.nguoi_gui_ten_thuc_te, nguoi_gui_sdt: d.nguoi_gui_sdt_thuc_te,
-          nguoi_nhan_ten: d.nguoi_nhan_ten_thuc_te, nguoi_nhan_sdt: d.nguoi_nhan_sdt_thuc_te,
-          diem_lay_chi_tiet: d.diem_lay_chi_tiet, diem_giao_chi_tiet: d.diem_giao_chi_tiet,
-          hinh_thuc_thanh_toan: d.hinh_thuc_thanh_toan || (d.loai_khach === 'B2C_VANG_LAI' ? 'TRA_TRUOC' : 'GHI_NO'), tien_cod_thu_ho: d.tien_cod_thu_ho,
-          item_actuals: itemActualsMap
-        });
+        setTimeout(() => {
+          actualsForm.setFieldsValue({
+            nguoi_gui_ten: d.nguoi_gui_ten_thuc_te, nguoi_gui_sdt: d.nguoi_gui_sdt_thuc_te,
+            nguoi_nhan_ten: d.nguoi_nhan_ten_thuc_te, nguoi_nhan_sdt: d.nguoi_nhan_sdt_thuc_te,
+            diem_lay_chi_tiet: d.diem_lay_chi_tiet, diem_giao_chi_tiet: d.diem_giao_chi_tiet,
+            hinh_thuc_thanh_toan: d.hinh_thuc_thanh_toan || (d.loai_khach === 'B2C_VANG_LAI' ? 'TRA_TRUOC' : 'GHI_NO'), tien_cod_thu_ho: d.tien_cod_thu_ho,
+            item_actuals: itemActualsMap
+          });
+        }, 0);
       }
     } catch {
       message.error('Không tải được thông tin');
@@ -73,7 +78,11 @@ const VanDonDetail = () => {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadDetail(); }, [id]);
+  // 🚀 FIX 2: Load Đơn vị tính để biết cái nào cần đo kích thước
+  useEffect(() => {
+    danhMucService.getDonViTinhList().then(res => setDonViTinhs(res.data?.data || res.data || []));
+    loadDetail();
+  }, [id]);
 
   // 🚀 Hàm tìm kiếm địa chỉ Goong Autocomplete
   const handleSearchAddress = async (value, type) => {
@@ -90,7 +99,8 @@ const VanDonDetail = () => {
 
   const handleUpdateStatus = async () => {
     try {
-      await vanDonService.updateStatus(id, routeStatus);
+      // 🚀 FIX 3: Truyền dạng Object { trang_thai_van_chuyen: ... } thay vì chuỗi trơn
+      await vanDonService.updateStatus(id, { trang_thai_van_chuyen: routeStatus });
       message.success('Cập nhật lộ trình thành công');
       loadDetail();
     } catch { message.error('Lỗi cập nhật trạng thái'); }
@@ -142,7 +152,7 @@ const VanDonDetail = () => {
         <Row gutter={16}>
           {/* ════════ CỘT TRÁI (INFO -> CÂN ĐO -> BẢN ĐỒ TO) ════════ */}
           <Col xs={24} lg={15}>
-            <Card size="small" bordered={false} style={{ marginBottom: 12, borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>📍 Thông tin Liên hệ & Địa chỉ</Text>}>
+            <Card size="small" variant="borderless" style={{ marginBottom: 12, borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>📍 Thông tin Liên hệ & Địa chỉ</Text>}>
               <Row gutter={24}>
                 <Col span={12}>
                   <div style={{ padding: '10px', borderRadius: 6, borderLeft: '4px solid #1890ff', backgroundColor: '#f0f5ff' }}>
@@ -170,46 +180,50 @@ const VanDonDetail = () => {
               </Row>
             </Card>
 
-            <Card size="small" bordered={false} style={{ marginBottom: 12, borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>⚖️ Cập nhật Số kg (Thủ Kho)</Text>}>
+            <Card size="small" variant="borderless" style={{ marginBottom: 12, borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>⚖️ Cập nhật Số kg (Thủ Kho)</Text>}>
               {(!data.items || data.items.length === 0) ? <Alert message="Lỗi tải hàng hóa" type="error" /> : (
-                (data.items || []).map((item, idx) => (
+                (data.items || []).map((item, idx) => {
+                  // 🚀 FIX 4: Xác định xem Đơn vị tính này có bắt buộc đo D/R/C không
+                  const dvt = donViTinhs.find(d => Number(d.id) === Number(item.don_vi_tinh_id));
+                  const isRequireDim = dvt?.yeu_cau_kich_thuoc === 1 || dvt?.yeu_cau_kich_thuoc === true;
+
+                  return (
                   <div key={item.id} style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 6, padding: '12px', marginBottom: 10 }}>
                     <Text strong>{idx + 1}. {item.ten_hang} ({item.so_luong} {item.ten_dvt})</Text>
 
-                    {/* 🚀 1. KHỐI MÀU VÀNG: LOGIC SO SÁNH QUY ĐỔI (Chỉ hiện khi nhập đủ 3 chiều) */}
+                    {/* KHỐI MÀU VÀNG: LOGIC SO SÁNH QUY ĐỔI */}
                     <Form.Item noStyle dependencies={[['item_actuals', item.id, 'trong_luong_thuc_te'], ['item_actuals', item.id, 'dai_cm'], ['item_actuals', item.id, 'rong_cm'], ['item_actuals', item.id, 'cao_cm']]}>
                       {({ getFieldValue }) => {
-                        const actualKg = getFieldValue(['item_actuals', item.id, 'trong_luong_thuc_te']) || 0;
-                        const d = getFieldValue(['item_actuals', item.id, 'dai_cm']) || 0;
-                        const r = getFieldValue(['item_actuals', item.id, 'rong_cm']) || 0;
-                        const c = getFieldValue(['item_actuals', item.id, 'cao_cm']) || 0;
+                        const actualKg = Number(getFieldValue(['item_actuals', item.id, 'trong_luong_thuc_te'])) || 0;
+                        const d = Number(getFieldValue(['item_actuals', item.id, 'dai_cm'])) || 0;
+                        const r = Number(getFieldValue(['item_actuals', item.id, 'rong_cm'])) || 0;
+                        const c = Number(getFieldValue(['item_actuals', item.id, 'cao_cm'])) || 0;
                         
-                        // Ẩn nếu chưa nhập đủ chiều dài, rộng, cao
-                        if (!d || !r || !c) return null; 
+                        // 🚀 Ẩn warning nếu Đơn vị tính không yêu cầu đo kích thước, hoặc nhập chưa đủ 3 chiều
+                        if (!isRequireDim || !d || !r || !c) return null; 
 
-                        const volKg = (d * r * c) / 5000 * item.so_luong; // Công thức chia 5000
+                        const volKg = (d * r * c) / 5000 * item.so_luong; 
                         const cw = Math.max(actualKg, volKg);
 
                         return (
                           <div style={{ fontSize: 13, color: '#555', marginTop: 10, padding: '8px 12px', background: '#fffbe6', border: '1px dashed #ffe58f', borderRadius: 6 }}>
                             💡 <b>Lưu ý tính cước:</b> Thể tích quy đổi <b>{volKg.toFixed(1)} kg</b> vs Cân thực tế <b>{actualKg.toFixed(1)} kg</b> <br/>
-                            ➔ Hệ thống tự động chốt mức cao hơn: <Text type="danger" strong>{cw.toFixed(1)} kg</Text> (Trọng lượng tính cước)
+                            ➔ Hệ thống tự động chốt mức cao hơn: <Text type="danger" strong>{cw.toFixed(1)} kg</Text>
                           </div>
                         );
                       }}
                     </Form.Item>
 
-                    {/* 🚀 2. KHỐI NHẬP LIỆU LINH ĐỘNG THEO TỪNG LOẠI HÀNG */}
+                    {/* KHỐI NHẬP LIỆU LINH ĐỘNG */}
                     <Row gutter={[8, 8]} align="bottom" style={{ marginTop: 10 }}>
-                      {/* Cân thực (Luôn luôn có) */}
-                      <Col span={item.cau_hinh_thuoc_tinh?.includes('dai_cm') ? 6 : 12}>
+                      <Col span={isRequireDim ? 6 : 12}>
                         <Form.Item name={['item_actuals', item.id, 'trong_luong_thuc_te']} label="Cân thực (kg)" style={{ marginBottom: 0 }} rules={[{ required: true }]}>
                           <InputNumber style={{ width: '100%' }} min={0.01} step={0.1} disabled={!canUpdateActuals} />
                         </Form.Item>
                       </Col>
 
-                      {/* Nếu là hàng cồng kềnh (Hiện Dài, Rộng, Cao) */}
-                      {item.cau_hinh_thuoc_tinh?.includes('dai_cm') && (
+                      {/* 🚀 Hiển thị D/R/C dựa vào Đơn vị tính */}
+                      {isRequireDim && (
                         <>
                           <Col span={6}>
                             <Form.Item name={['item_actuals', item.id, 'dai_cm']} label="Dài (cm)" style={{ marginBottom: 0 }}>
@@ -229,7 +243,7 @@ const VanDonDetail = () => {
                         </>
                       )}
 
-                      {/* Nếu là hàng lạnh (Hiện Nhiệt độ) */}
+                      {/* Hiển thị Nhiệt độ dựa vào Loại hàng */}
                       {item.cau_hinh_thuoc_tinh?.includes('nhiet_do_c') && (
                         <Col span={6}>
                           <Form.Item name={['item_actuals', item.id, 'nhiet_do_c']} label="Nhiệt độ (°C)" style={{ marginBottom: 0 }}>
@@ -239,11 +253,11 @@ const VanDonDetail = () => {
                       )}
                     </Row>
                   </div>
-                ))
+                )})
               )}
             </Card>
 
-            <Card size="small" bordered={false} style={{ borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>🗺️ Bản đồ Lộ trình (Kéo thả Maker để đổi địa chỉ)</Text>}>
+            <Card size="small" variant="borderless" style={{ borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>🗺️ Bản đồ Lộ trình (Kéo thả Maker để đổi địa chỉ)</Text>}>
               {/* 🚀 BẢN ĐỒ NẰM DƯỚI CÙNG VÀ CỰC KỲ RỘNG RÃI */}
               <div style={{ width: '100%', height: '550px', backgroundColor: '#fafafa', borderRadius: '8px', overflow: 'hidden' }}>
                 <GoongMapRoute
@@ -260,7 +274,7 @@ const VanDonDetail = () => {
           <Col xs={24} lg={9}>
             <div style={{ position: 'sticky', top: 20 }}>
 
-              <Card size="small" bordered={false} style={{ marginBottom: 12, borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>🚚 Trạng thái Xe</Text>}>
+              <Card size="small" variant="borderless" style={{ marginBottom: 12, borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>🚚 Trạng thái Xe</Text>}>
                 <Row gutter={8}>
                   <Col span={16}>
                     <Select value={routeStatus} onChange={setRouteStatus} style={{ width: '100%' }} disabled={isCancelled}>
@@ -273,7 +287,7 @@ const VanDonDetail = () => {
                 </Row>
               </Card>
 
-              <Card size="small" bordered={false} style={{ marginBottom: 12, borderRadius: 8, border: '1px solid #1890ff' }} title={<Text strong>💰 Tài chính</Text>}>
+              <Card size="small" variant="borderless" style={{ marginBottom: 12, borderRadius: 8, border: '1px solid #1890ff' }} title={<Text strong>💰 Tài chính</Text>}>
                 <Row gutter={8}>
                   <Col span={12}>
                     <Form.Item name="hinh_thuc_thanh_toan" label="Thu tiền" style={{ marginBottom: 10 }}>
@@ -310,7 +324,7 @@ const VanDonDetail = () => {
                 </div>
               </Card>
 
-              <Card size="small" bordered={false} style={{ borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>📋 Lịch sử Phiếu Thu</Text>}>
+              <Card size="small" variant="borderless" style={{ borderRadius: 8, border: '1px solid #e8e8e8' }} title={<Text strong>📋 Lịch sử Phiếu Thu</Text>}>
                 <Table dataSource={data.lich_su_thu || []} rowKey={(_, i) => i} pagination={false} size="small" locale={{ emptyText: 'Chưa có giao dịch' }}
                   columns={[
                     { title: 'Ngày', width: 85, render: (_, r) => formatDate(r.ngay_thu) },

@@ -47,7 +47,8 @@ const LoaiHangPage = () => {
       });
     } else {
       form.resetFields();
-      form.setFieldsValue({ heSoGia: 1.0, cauHinhThuocTinh: ['dai_cm', 'rong_cm', 'cao_cm'] }); 
+      // 🚀 FIX: Thay vì ['dai_cm', 'rong_cm', 'cao_cm'], giờ gán mảng rỗng []
+      form.setFieldsValue({ heSoGia: 1.0, cauHinhThuocTinh: [] }); 
     }
     setIsModalVisible(true);
   };
@@ -162,11 +163,9 @@ const LoaiHangPage = () => {
           <Form.Item name="heSoGia" label="Hệ số giá cước (Mặc định: 1.0 - Giá nền chuẩn)" rules={[{ required: true }]}>
             <InputNumber min={0.1} max={10} step={0.1} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="cauHinhThuocTinh" label="Các trường thông tin cần Sales nhập (JSON)" rules={[{ required: true }]}>
-            <Select mode="multiple" placeholder="Chọn thuộc tính...">
-              <Option value="dai_cm">Chiều Dài (cm)</Option>
-              <Option value="rong_cm">Chiều Rộng (cm)</Option>
-              <Option value="cao_cm">Chiều Cao (cm)</Option>
+          <Form.Item name="cauHinhThuocTinh" label="Các trường thông tin cần Sales nhập (JSON)" rules={[{ required: false }]}>
+            <Select mode="multiple" placeholder="Chọn thuộc tính đặc biệt...">
+              {/* 🚀 FIX: Đã xóa Option dai_cm, rong_cm, cao_cm */}
               <Option value="nhiet_do_c">Nhiệt độ bảo quản (°C)</Option>
               <Option value="so_lit">Thể tích hóa chất (Lít)</Option>
               <Option value="loai_bon_chua">Loại bồn chứa</Option>

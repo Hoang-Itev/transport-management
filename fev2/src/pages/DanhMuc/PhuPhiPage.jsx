@@ -67,7 +67,7 @@ const TabDanhSachPhuPhi = ({ phuPhiList, fetchPhuPhiList, loading }) => {
       </div>
       <Table columns={columns} dataSource={filteredData} rowKey="id" loading={loading} pagination={{ pageSize: 10, showSizeChanger: true }} bordered />
       
-      <Modal title={editingId ? "Sửa phụ phí" : "Thêm phụ phí mới"} open={isModalVisible} onCancel={() => setIsModalVisible(false)} onOk={() => form.submit()} destroyOnClose>
+      <Modal title={editingId ? "Sửa phụ phí" : "Thêm phụ phí mới"} open={isModalVisible} onCancel={() => setIsModalVisible(false)} onOk={() => form.submit()} destroyOnHidden>
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
           <Form.Item name="id" label="Mã phụ phí (VD: PP_LAY)" rules={[{ required: true }]}><Input disabled={!!editingId} placeholder="Viết hoa, không dấu" /></Form.Item>
           <Form.Item name="tenPhuPhi" label="Tên phụ phí (VD: Phí lấy tận nơi)" rules={[{ required: true }]}><Input /></Form.Item>
@@ -92,11 +92,16 @@ const TabMaTranGia = ({ phuPhiList }) => {
   const [data, setData] = useState([]);
   const [xeList, setXeList] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [searchText, setSearchText] = useState(''); // 🚀 Bổ sung state tìm kiếm
+  const [searchText, setSearchText] = useState('');
   
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [selectedPhuPhiRule, setSelectedPhuPhiRule] = useState(null); 
+
+  // 🚀 FIX: Dùng Form.useWatch để lấy giá trị realtime thay vì dùng State dễ sinh lỗi
+  const currentPhuPhiId = Form.useWatch('phu_phi_id', form);
+  
+  // Suy ra quy tắc của phụ phí đang được chọn trong Form
+  const selectedRule = phuPhiList.find(p => p.id === currentPhuPhiId)?.cach_tinh;
 
   useEffect(() => {
     danhMucService.getLoaiXeList().then(res => setXeList(res.data));
@@ -116,25 +121,28 @@ const TabMaTranGia = ({ phuPhiList }) => {
     setEditingId(record?.id || null);
     if (record) {
       form.setFieldsValue({ phu_phi_id: record.phu_phi_id, loai_xe_id: record.loai_xe_id, don_gia: Number(record.don_gia) });
-      const pp = phuPhiList.find(p => p.id === record.phu_phi_id);
-      setSelectedPhuPhiRule(pp?.cach_tinh);
     } else {
       form.resetFields();
-      setSelectedPhuPhiRule(null);
     }
     setIsModalVisible(true);
   };
 
-  const handlePhuPhiChange = (val) => {
-    const pp = phuPhiList.find(p => p.id === val);
-    setSelectedPhuPhiRule(pp?.cach_tinh);
+  const handlePhuPhiChange = () => {
+    // Khi đổi Phụ phí, phải xóa Xe đi để tránh lưu rác vào DB
     form.setFieldsValue({ loai_xe_id: null }); 
   };
 
   const handleSubmit = async (values) => {
     try {
-      if (editingId) await danhMucService.updateBangGiaPhuPhi(editingId, values);
-      else await danhMucService.createBangGiaPhuPhi(values);
+      const payload = {
+        phu_phi_id: values.phu_phi_id,
+        loai_xe_id: values.loai_xe_id || null, 
+        don_gia: values.don_gia
+      };
+
+      if (editingId) await danhMucService.updateBangGiaPhuPhi(editingId, payload);
+      else await danhMucService.createBangGiaPhuPhi(payload);
+      
       message.success('Cập nhật giá phụ phí thành công');
       setIsModalVisible(false); fetchData();
     } catch (error) { message.error('Lỗi khi lưu bảng giá'); }
@@ -146,20 +154,16 @@ const TabMaTranGia = ({ phuPhiList }) => {
     }});
   };
 
-  // 🚀 Logic Nhân bản (Dấu Cộng)
   const handleClone = (record) => {
     setEditingId(null);
     form.setFieldsValue({
       phu_phi_id: record.phu_phi_id,
-      loai_xe_id: null, // Reset ô chọn xe để user tự chọn xe mới
+      loai_xe_id: null, 
       don_gia: Number(record.don_gia)
     });
-    const pp = phuPhiList.find(p => p.id === record.phu_phi_id);
-    setSelectedPhuPhiRule(pp?.cach_tinh);
     setIsModalVisible(true);
   };
 
-  // 🚀 Logic Tìm kiếm thông minh
   const filteredData = data.filter(item => {
     const matchPhuPhi = item.ten_phu_phi?.toLowerCase().includes(searchText.toLowerCase());
     const matchXe = item.ten_xe?.toLowerCase().includes(searchText.toLowerCase());
@@ -188,18 +192,30 @@ const TabMaTranGia = ({ phuPhiList }) => {
       </div>
       <Table columns={columns} dataSource={filteredData} rowKey="id" loading={loading} pagination={{ pageSize: 10, showSizeChanger: true }} bordered />
       
-      <Modal title={editingId ? "Sửa Giá Phụ Phí" : "Thiết lập Giá Phụ Phí"} open={isModalVisible} onCancel={() => setIsModalVisible(false)} onOk={() => form.submit()} destroyOnClose>
+      <Modal title={editingId ? "Sửa Giá Phụ Phí" : "Thiết lập Giá Phụ Phí"} open={isModalVisible} onCancel={() => setIsModalVisible(false)} onOk={() => form.submit()} destroyOnHidden>
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
           <Form.Item name="phu_phi_id" label="Chọn Phụ Phí" rules={[{ required: true }]}>
-            <Select showSearch onChange={handlePhuPhiChange}>
-              {phuPhiList.filter(p => p.is_active === 1).map(p => <Option key={p.id} value={p.id}>{p.ten_phu_phi} ({p.cach_tinh})</Option>)}
+            <Select 
+              showSearch 
+              onChange={handlePhuPhiChange}
+              /* 🚀 FIX 1: Dạy cho Ant Design cách tìm kiếm bằng tiếng Việt có dấu */
+              filterOption={(input, option) => (option?.children ?? '').toString().toLowerCase().includes(input.toLowerCase())}
+            >
+              {/* 🚀 FIX 2: Bỏ luôn hàm filter is_active vì Backend đã lọc sẵn rồi, chống lỗi undefined */}
+              {phuPhiList.map(p => <Option key={p.id} value={p.id}>{p.ten_phu_phi} ({p.cach_tinh})</Option>)}
             </Select>
           </Form.Item>
           
-          {selectedPhuPhiRule === 'THEO_LOAI_XE' && (
+          {selectedRule === 'THEO_LOAI_XE' && (
              <Form.Item name="loai_xe_id" label="Áp dụng cho Loại xe đi chở" rules={[{ required: true, message: 'Bắt buộc chọn Xe do quy tắc phụ phí là THEO_LOAI_XE' }]}>
-               <Select showSearch allowClear>
-                 {xeList.filter(x => x.is_active === 1).map(x => <Option key={x.id} value={x.id}>{x.ten_hien_thi}</Option>)}
+               <Select 
+                 showSearch 
+                 allowClear
+                 /* 🚀 Dạy tìm kiếm cho ô Loại Xe luôn */
+                 filterOption={(input, option) => (option?.children ?? '').toString().toLowerCase().includes(input.toLowerCase())}
+               >
+                 {/* Bỏ luôn filter ở đây cho an toàn */}
+                 {xeList.map(x => <Option key={x.id} value={x.id}>{x.ten_hien_thi}</Option>)}
                </Select>
              </Form.Item>
           )}
@@ -231,7 +247,7 @@ const PhuPhiPage = () => {
   useEffect(() => { fetchPhuPhiList(); }, []);
 
   return (
-    <Card bordered={false}>
+    <Card variant="borderless">
       <Title level={4} style={{ margin: 0, marginBottom: 5 }}>Quản lý Bảng giá Phụ phí (Surcharges)</Title>
       <Text type="secondary" style={{ display: 'block', marginBottom: 20 }}>
         Cấu hình quy tắc và biểu giá tự động cho các khoản phí phát sinh (Lấy tận nơi, Bốc xếp...)

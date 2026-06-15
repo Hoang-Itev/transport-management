@@ -2,7 +2,8 @@ const db = require('../config/database');
 
 const Customer = {
   // Cực nhanh vì không cần Subquery tính nợ nữa
-  findAll: async ({ page = 1, limit = 10, search = '', isActive }) => {
+  // 🚀 FIX: Nhận thêm biến loaiKhach
+  findAll: async ({ page = 1, limit = 10, search = '', isActive, loaiKhach }) => {
     const offset = (page - 1) * limit;
     let query = `SELECT * FROM khach_hangs WHERE 1=1`;
     const params = [];
@@ -11,9 +12,17 @@ const Customer = {
       query += ` AND (ten_cong_ty LIKE ? OR ma_so_thue LIKE ? OR so_dien_thoai LIKE ?)`;
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
-    if (isActive !== undefined) {
+
+    // 🚀 FIX 1: Thêm logic Lọc theo Loại khách (B2B hay B2C)
+    if (loaiKhach) {
+      query += ` AND loai_khach = ?`;
+      params.push(loaiKhach);
+    }
+
+    // 🚀 FIX 2: Hỗ trợ cả 2 chuẩn dữ liệu (Frontend gửi "true/false" hoặc "1/0" đều nhận được hết)
+    if (isActive !== undefined && isActive !== '') {
       query += ` AND is_active = ?`;
-      params.push(isActive === 'true' ? 1 : 0);
+      params.push((isActive === 'true' || isActive === '1' || isActive === 1) ? 1 : 0);
     }
 
     const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) as total');

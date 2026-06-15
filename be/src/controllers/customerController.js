@@ -1,18 +1,23 @@
 const Customer = require('../models/customerModel');
 
 // [GET] /api/v1/khach-hang
+// [GET] /api/v1/khach-hang
 const getCustomers = async (req, res) => {
   try {
-    // FIX LỖI 500: Ép kiểu bắt buộc sang Number để MySQL không bị sập
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
     const search = req.query.search || '';
-    const isActive = req.query.isActive;
     
-    const result = await Customer.findAll({ page, limit, search, isActive });
+    // 🚀 FIX: Bắt đúng tên biến Frontend gửi lên (is_active và loai_khach)
+    const isActive = req.query.is_active || req.query.isActive; 
+    const loaiKhach = req.query.loai_khach || req.query.loaiKhach;
+    
+    // 🚀 FIX: Truyền thêm loaiKhach vào Model
+    const result = await Customer.findAll({ page, limit, search, isActive, loaiKhach });
+    
     res.json({ success: true, ...result });
   } catch (error) {
-    console.error("LỖI GET KHACH HANG:", error); // In ra log đỏ ở Terminal
+    console.error("LỖI GET KHACH HANG:", error);
     res.status(500).json({ success: false, error: { message: error.message } });
   }
 };
