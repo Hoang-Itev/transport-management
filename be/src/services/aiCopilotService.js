@@ -15,34 +15,68 @@ const cleanJsonResponse = (text) => {
 
 const parseZaloMessage = async (message) => {
   const prompt = `Bạn là trợ lý điều phối Logistics xuất sắc. Đọc tin nhắn Zalo của khách và bóc tách thành JSON chuẩn.
- 
+
 QUY TẮC SUY LUẬN "loaiHangId":
-- Nếu là "hóa chất", "chất lỏng nguy hiểm": "loaiHangId": 3
-- Nếu là "dễ vỡ", "thủy tinh", "điện tử", "rượu": "loaiHangId": 2
-- Các loại hàng hóa thông thường khác (quần áo, bánh kẹo, máy móc...): "loaiHangId": 1
+- Nếu khách nhắc đến "đông lạnh", "hải sản", "tôm", "cá", "thịt", "nhiệt độ", "làm lạnh": "loaiHangId": 5
+- Nếu là "hóa chất", "chất lỏng nguy hiểm", "dễ cháy", "bồn chứa": "loaiHangId": 4
+- Nếu là "dễ vỡ", "thủy tinh", "điện tử", "rượu", "giá trị cao": "loaiHangId": 3
+- Nếu là "cồng kềnh", "siêu nhẹ": "loaiHangId": 2
+- Các loại hàng hóa thông thường khác (quần áo, bánh kẹo, bách hóa...): "loaiHangId": 1
+
+QUY TẮC SUY LUẬN "donViTinhId":
+- Nhắc đến "thùng", "hộp" -> 1
+- Nhắc đến "pallet" -> 2
+- Nhắc đến "kiện", "gói" -> 3
+- Nhắc đến "cuộn" -> 4
+- Nhắc đến "cái", "chiếc" -> 5
+- Nhắc đến "bao", "túi" -> 6
+- Mặc định: 1
 
 QUY TẮC SUY LUẬN XE (loaiXeId):
-- Chỉ điền mã xe nếu khách yêu cầu Bao xe (FTL). VD: "xe máy" -> XE_MAY, "1.25 tấn" -> XE_1.25T, "5 tấn" -> XE_5T, "15 tấn" -> XE_15T. Nếu là hàng ghép (LTL) thì để null.
+- Chỉ điền mã nếu bao xe (FTL). VD: "xe máy" -> XE_MAY, "1.25 tấn" -> XE_1.25T, "5 tấn" -> XE_5T, "15 tấn" -> XE_15T. Hàng ghép (LTL) thì để null.
+
+QUY TẮC SUY LUẬN THÔNG TIN LIÊN HỆ:
+- Cố gắng tìm Tên và SĐT của người gửi và người nhận trong tin nhắn. Nếu không có thì để chuỗi rỗng "".
+
+QUY TẮC SUY LUẬN NHIỆT ĐỘ:
+- Nếu khách có nhắc đến nhiệt độ âm hoặc dương (VD: "-18 độ", "âm 18 độ"), hãy trích xuất con số và điền vào "nhiet_do_c". Nếu không có, để null.
+
+QUY TẮC SUY LUẬN PHỤ PHÍ (phuPhis):
+- Dựa vào yêu cầu của khách để thêm mã phụ phí tương ứng vào mảng.
+- "thuê xe lấy", "xe tải qua lấy" -> "PP_LAY"
+- "thuê xe giao", "chở tận nơi" -> "PP_GIAO"
+- "bốc xếp", "nhân viên bê", "xuống hàng" -> "PP_BOC_XEP"
+- "đóng gói", "bọc màng", "bọc nilon", "đóng thùng" -> "PP_DONG_GOI"
+- "rớt điểm", "ghé thêm" -> "PP_ROT_DIEM"
 
 FORMAT JSON DUY NHẤT TRẢ VỀ (Phải tuân thủ tuyệt đối cấu trúc này):
 {
-  "khachHangSdt": "SĐT của khách (nếu có)",
+  "khachHangSdt": "SĐT của khách liên hệ (nếu có)",
   "bookings": [
     {
-      "hinhThuc": "LTL", 
-      "diemLayChiTiet": "Địa chỉ lấy hàng chi tiết hoặc Tên Tỉnh/Thành",
-      "diemGiaoChiTiet": "Địa chỉ giao hàng chi tiết hoặc Tên Tỉnh/Thành",
-      "loaiXeId": "Mã xe hoặc null",
+      "hinhThuc": "LTL",
+      "nguoiGuiTen": "Tên người gửi",
+      "nguoiGuiSdt": "SĐT người gửi",
+      "diemLayChiTiet": "Địa chỉ lấy hàng chi tiết",
+      "nguoiNhanTen": "Tên người nhận",
+      "nguoiNhanSdt": "SĐT người nhận",
+      "diemGiaoChiTiet": "Địa chỉ giao hàng chi tiết",
+      "loaiXeId": null,
+      "phuPhis": [
+        { "phuPhiId": "Mã phụ phí nếu có" }
+      ],
       "items": [
         {
           "tenHang": "Tên hàng hóa",
           "loaiHangId": 1,
+          "donViTinhId": 1, 
           "soLuong": 1,
           "trongLuongThucTe": 0,
           "thuocTinhChiTiet": {
             "dai_cm": 0,
             "rong_cm": 0,
-            "cao_cm": 0
+            "cao_cm": 0,
+            "nhiet_do_c": null
           }
         }
       ]
@@ -51,8 +85,12 @@ FORMAT JSON DUY NHẤT TRẢ VỀ (Phải tuân thủ tuyệt đối cấu trúc
 }
 
 TIN NHẮN KHÁCH HÀNG:
-
 "${message}"`;
+
+  // ... (Phần code gọi API bên dưới giữ nguyên)
+// ...
+
+// ... (phần code gọi API bên dưới giữ nguyên)
 
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash", generationConfig: { responseMimeType: "application/json" } });

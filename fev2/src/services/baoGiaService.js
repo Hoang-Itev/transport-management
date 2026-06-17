@@ -18,6 +18,8 @@ export const baoGiaService = {
   // Xóa báo giá (Chỉ dành cho DRAFT)
   delete: (id) => axiosClient.delete(`/bao-gia/${id}`),
 
+  sendEmail: (id) => axiosClient.post(`/bao-gia/${id}/gui-email`),
+
   exportPdf: async (id) => {
     const response = await axiosClient.get(`/bao-gia/${id}/xuat-pdf`, { responseType: 'blob' });
     const fileData = response.data ? response.data : response;

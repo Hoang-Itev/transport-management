@@ -252,7 +252,13 @@ const BookingModal = ({ visible, onCancel, onSave, mode, masterData, editingData
                                 const lhSelected = masterData.loaiHangs?.find(l => l.id === currentItem.loaiHangId);
                                 // 🚀 FIX 1: Lấy thêm cấu hình Đơn vị tính
                                 const dvtSelected = masterData.donViTinhs?.find(d => d.id === currentItem.donViTinhId);
-                                const isRequireDim = dvtSelected?.yeu_cau_kich_thuoc === 1 || dvtSelected?.yeu_cau_kich_thuoc === true;
+
+                                // 🚀 FIX: BẢO VỆ CÔNG SỨC CỦA AI!
+                                // Nếu AI đã bóc tách được kích thước (dai_cm > 0) thì BẮT BUỘC hiện ô D/R/C ra giữ data, 
+                                // bất chấp Đơn vị tính đã được chọn hay chưa.
+                                const isRequireDim = dvtSelected?.yeu_cau_kich_thuoc === 1
+                                    || dvtSelected?.yeu_cau_kich_thuoc === true
+                                    || (Number(currentItem.thuocTinhChiTiet?.dai_cm) > 0);
 
                                 let attrConfig = [];
                                 try { attrConfig = typeof lhSelected?.cau_hinh_thuoc_tinh === 'string' ? JSON.parse(lhSelected.cau_hinh_thuoc_tinh) : (lhSelected?.cau_hinh_thuoc_tinh || []); } catch (e) { }

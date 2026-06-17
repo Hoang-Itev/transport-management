@@ -54,6 +54,7 @@ const VanDonDetail = () => {
         (d.items || []).forEach(item => {
           const saved = Array.isArray(savedActuals) ? savedActuals.find(s => String(s.booking_item_id) === String(item.id)) : null;
           itemActualsMap[item.id] = {
+            so_luong: saved?.so_luong ?? item.so_luong, // 🚀 FIX 1: Lấy số lượng từ Báo giá hoặc data đã chốt
             trong_luong_thuc_te: saved?.trong_luong_thuc_te ?? item.trong_luong_thuc_te,
             dai_cm: saved?.dai_cm ?? item.thuoc_tinh_chi_tiet?.dai_cm ?? null,
             rong_cm: saved?.rong_cm ?? item.thuoc_tinh_chi_tiet?.rong_cm ?? null,
@@ -188,54 +189,67 @@ const VanDonDetail = () => {
                   const isRequireDim = dvt?.yeu_cau_kich_thuoc === 1 || dvt?.yeu_cau_kich_thuoc === true;
 
                   return (
-                  <div key={item.id} style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 6, padding: '12px', marginBottom: 10 }}>
-                    <Text strong>{idx + 1}. {item.ten_hang} ({item.so_luong} {item.ten_dvt})</Text>
+                    <div key={item.id} style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 6, padding: '12px', marginBottom: 10 }}>
+                      <Text strong>{idx + 1}. {item.ten_hang} ({item.so_luong} {item.ten_dvt})</Text>
 
-                    {/* KHỐI MÀU VÀNG: LOGIC SO SÁNH QUY ĐỔI */}
-                    <Form.Item noStyle dependencies={[['item_actuals', item.id, 'trong_luong_thuc_te'], ['item_actuals', item.id, 'dai_cm'], ['item_actuals', item.id, 'rong_cm'], ['item_actuals', item.id, 'cao_cm']]}>
-                      {({ getFieldValue }) => {
-                        const actualKg = Number(getFieldValue(['item_actuals', item.id, 'trong_luong_thuc_te'])) || 0;
-                        const d = Number(getFieldValue(['item_actuals', item.id, 'dai_cm'])) || 0;
-                        const r = Number(getFieldValue(['item_actuals', item.id, 'rong_cm'])) || 0;
-                        const c = Number(getFieldValue(['item_actuals', item.id, 'cao_cm'])) || 0;
-                        
-                        // 🚀 Ẩn warning nếu Đơn vị tính không yêu cầu đo kích thước, hoặc nhập chưa đủ 3 chiều
-                        if (!isRequireDim || !d || !r || !c) return null; 
+                      {/* KHỐI MÀU VÀNG: LOGIC SO SÁNH QUY ĐỔI */}
+                      {/* KHỐI MÀU VÀNG: LOGIC SO SÁNH QUY ĐỔI */}
+                      <Form.Item noStyle dependencies={[['item_actuals', item.id, 'so_luong'], ['item_actuals', item.id, 'trong_luong_thuc_te'], ['item_actuals', item.id, 'dai_cm'], ['item_actuals', item.id, 'rong_cm'], ['item_actuals', item.id, 'cao_cm']]}>
+                        {({ getFieldValue }) => {
+                          // 🚀 FIX 2: Bắt thêm biến qty (số lượng) từ Form
+                          const qty = Number(getFieldValue(['item_actuals', item.id, 'so_luong'])) || 1;
+                          const actualKg = Number(getFieldValue(['item_actuals', item.id, 'trong_luong_thuc_te'])) || 0;
+                          const d = Number(getFieldValue(['item_actuals', item.id, 'dai_cm'])) || 0;
+                          const r = Number(getFieldValue(['item_actuals', item.id, 'rong_cm'])) || 0;
+                          const c = Number(getFieldValue(['item_actuals', item.id, 'cao_cm'])) || 0;
 
-                        const volKg = (d * r * c) / 5000 * item.so_luong; 
-                        const cw = Math.max(actualKg, volKg);
+                          // Ẩn warning nếu Đơn vị tính không yêu cầu đo kích thước, hoặc nhập chưa đủ 3 chiều
+                          if (!isRequireDim || !d || !r || !c) return null;
 
-                        return (
-                          <div style={{ fontSize: 13, color: '#555', marginTop: 10, padding: '8px 12px', background: '#fffbe6', border: '1px dashed #ffe58f', borderRadius: 6 }}>
-                            💡 <b>Lưu ý tính cước:</b> Thể tích quy đổi <b>{volKg.toFixed(1)} kg</b> vs Cân thực tế <b>{actualKg.toFixed(1)} kg</b> <br/>
-                            ➔ Hệ thống tự động chốt mức cao hơn: <Text type="danger" strong>{cw.toFixed(1)} kg</Text>
-                          </div>
-                        );
-                      }}
-                    </Form.Item>
+                          // 🚀 Nhân thể tích với số lượng mới
+                          const volKg = (d * r * c) / 5000 * qty;
+                          const cw = Math.max(actualKg, volKg);
 
+                          return (
+                            <div style={{ fontSize: 13, color: '#555', marginTop: 10, padding: '8px 12px', background: '#fffbe6', border: '1px dashed #ffe58f', borderRadius: 6 }}>
+                              💡 <b>Lưu ý tính cước:</b> Thể tích quy đổi <b>{volKg.toFixed(1)} kg</b> vs Cân thực tế <b>{actualKg.toFixed(1)} kg</b> <br />
+                              ➔ Hệ thống tự động chốt mức cao hơn: <Text type="danger" strong>{cw.toFixed(1)} kg</Text>
+                            </div>
+                          );
+                        }}
+                      </Form.Item>
+
+                      {/* KHỐI NHẬP LIỆU LINH ĐỘNG */}
+              
                     {/* KHỐI NHẬP LIỆU LINH ĐỘNG */}
                     <Row gutter={[8, 8]} align="bottom" style={{ marginTop: 10 }}>
-                      <Col span={isRequireDim ? 6 : 12}>
+                      
+                      {/* Cân thực (Luôn luôn hiển thị) */}
+                      <Col span={isRequireDim ? 4 : 8}>
                         <Form.Item name={['item_actuals', item.id, 'trong_luong_thuc_te']} label="Cân thực (kg)" style={{ marginBottom: 0 }} rules={[{ required: true }]}>
                           <InputNumber style={{ width: '100%' }} min={0.01} step={0.1} disabled={!canUpdateActuals} />
                         </Form.Item>
                       </Col>
 
-                      {/* 🚀 Hiển thị D/R/C dựa vào Đơn vị tính */}
+                      {/* 🚀 FIX: Gom chung Số Lượng vào cùng nhóm với Dài/Rộng/Cao */}
                       {isRequireDim && (
                         <>
-                          <Col span={6}>
+                          <Col span={4}>
+                            <Form.Item name={['item_actuals', item.id, 'so_luong']} label="Số lượng" style={{ marginBottom: 0 }} rules={[{ required: true }]}>
+                              <InputNumber style={{ width: '100%' }} min={1} disabled={!canUpdateActuals} />
+                            </Form.Item>
+                          </Col>
+                          <Col span={4}>
                             <Form.Item name={['item_actuals', item.id, 'dai_cm']} label="Dài (cm)" style={{ marginBottom: 0 }}>
                               <InputNumber style={{ width: '100%' }} min={0} disabled={!canUpdateActuals} />
                             </Form.Item>
                           </Col>
-                          <Col span={6}>
+                          <Col span={4}>
                             <Form.Item name={['item_actuals', item.id, 'rong_cm']} label="Rộng (cm)" style={{ marginBottom: 0 }}>
                               <InputNumber style={{ width: '100%' }} min={0} disabled={!canUpdateActuals} />
                             </Form.Item>
                           </Col>
-                          <Col span={6}>
+                          <Col span={4}>
                             <Form.Item name={['item_actuals', item.id, 'cao_cm']} label="Cao (cm)" style={{ marginBottom: 0 }}>
                               <InputNumber style={{ width: '100%' }} min={0} disabled={!canUpdateActuals} />
                             </Form.Item>
@@ -245,15 +259,16 @@ const VanDonDetail = () => {
 
                       {/* Hiển thị Nhiệt độ dựa vào Loại hàng */}
                       {item.cau_hinh_thuoc_tinh?.includes('nhiet_do_c') && (
-                        <Col span={6}>
+                        <Col span={isRequireDim ? 4 : 8}>
                           <Form.Item name={['item_actuals', item.id, 'nhiet_do_c']} label="Nhiệt độ (°C)" style={{ marginBottom: 0 }}>
                             <InputNumber style={{ width: '100%' }} disabled={!canUpdateActuals} />
                           </Form.Item>
                         </Col>
                       )}
                     </Row>
-                  </div>
-                )})
+                    </div>
+                  )
+                })
               )}
             </Card>
 

@@ -1,4 +1,3 @@
-// src/routes/quotationRoutes.js
 const express = require('express');
 const router = express.Router();
 const quotationController = require('../controllers/quotationController');
@@ -17,6 +16,9 @@ router.get('/:id/xuat-pdf', quotationController.exportPdf);
 router.post('/:id/gui', quotationController.sendQuotation);
 router.post('/:id/xac-nhan', quotationController.confirmQuotation);
 router.post('/:id/tu-choi', quotationController.rejectQuotation);
+
+// 🚀 FIX: MỞ ĐƯỜNG DẪN API CHO FRONTEND GỌI CHỨC NĂNG GỬI MAIL
+router.post('/:id/gui-email', quotationController.sendQuotationEmailController);
 
 // 5. CRUD Cơ bản
 router.get('/',    quotationController.getQuotations);

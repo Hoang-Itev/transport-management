@@ -3,6 +3,9 @@ const db = require('../config/database');
 const { parseZaloMessage } = require('../services/aiCopilotService');
 const pdfService = require('../services/pdfService');
 
+// 🚀 FIX: Import thêm hàm gửi mail báo giá từ emailService
+const { sendQuotationEmail } = require('../services/emailService'); 
+
 const analyzeZaloText = async (req, res) => {
   try {
     const { text } = req.body;
@@ -36,12 +39,11 @@ const processBookingData = async (bookings) => {
       }
 
       if (bk.hinhThuc === 'LTL') {
-          // 🚀 Truy vấn lấy thêm cột cuoc_toi_thieu
           const [basePriceRow] = await db.query(`SELECT don_gia_goc_kg, cuoc_toi_thieu FROM bang_gia_ltls WHERE is_active = 1 AND moc_tu_km <= ? AND moc_den_km >= ? LIMIT 1`, [bk.soKmApi, bk.soKmApi]);
           const [discountRow] = await db.query(`SELECT he_so_chiet_khau FROM chiet_khau_san_luong_ltls WHERE moc_tu_kg <= ? AND moc_den_kg >= ? LIMIT 1`, [totalChargeableWeightBooking, totalChargeableWeightBooking]);
           
           const donGiaGoc = basePriceRow.length > 0 ? Number(basePriceRow[0].don_gia_goc_kg) : 0;
-          const minCharge = basePriceRow.length > 0 ? Number(basePriceRow[0].cuoc_toi_thieu) : 0; // 🚀 Lấy biến Mincharge
+          const minCharge = basePriceRow.length > 0 ? Number(basePriceRow[0].cuoc_toi_thieu) : 0; 
           const heSoChietKhau = discountRow.length > 0 ? Number(discountRow[0].he_so_chiet_khau) : 1.0;
 
           if (donGiaGoc === 0) throw new Error(`Khoảng cách ${bk.soKmApi}km chưa có cấu hình giá LTL`);
@@ -52,12 +54,10 @@ const processBookingData = async (bookings) => {
               tongCuocChinh += donGiaGoc * item.chargeableWeight * heSoGia * heSoChietKhau;
           }
 
-          // 🚀 ÁP DỤNG LUẬT DƯỚI BACKEND
           if (tongCuocChinh < minCharge) {
               tongCuocChinh = minCharge;
           }
       } else if (bk.hinhThuc === 'FTL') {
-          // 🚀 FIX LỖI 500: Tự tính giá FTL bằng SQL thay vì gọi file pricingEngine bị lỗi
           const [ftlRows] = await db.query(`SELECT * FROM bang_gia_ftls WHERE loai_xe_id = ? AND is_active = 1 ORDER BY moc_tu_km ASC`, [bk.loaiXeId]);
           if (ftlRows.length > 0) {
               let kmToCalc = Number(bk.soKmApi) || 0;
@@ -170,4 +170,43 @@ const exportPdf = async (req, res) => {
   } catch (error) { res.status(500).json({ success: false, message: error.message }); }
 };
 
-module.exports = { analyzeZaloText, getQuotations, getQuotationById, createQuotation, updateQuotation, sendQuotation, confirmQuotation, rejectQuotation, deleteQuotation, exportPdf };
+// 🚀 FIX: HÀM GỬI EMAIL BÁO GIÁ CHO KHÁCH HÀNG ĐƯỢC BỔ SUNG VÀO ĐÂY
+const sendQuotationEmailController = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Lấy thông tin Email và Tên khách hàng từ DB
+    const [khRows] = await db.query(`
+      SELECT kh.email, kh.ten_cong_ty 
+      FROM bao_gias bg
+      JOIN khach_hangs kh ON bg.khach_hang_id = kh.id
+      WHERE bg.id = ?
+    `, [id]);
+
+    if (khRows.length === 0 || !khRows[0].email) {
+      return res.status(404).json({ success: false, message: 'Khách hàng này chưa có địa chỉ Email trong hệ thống!' });
+    }
+
+    // 2. Tạo file PDF
+    const quotation = await Quotation.getFullDetailsForPdf(id);
+    if (!quotation) return res.status(404).json({ success: false, message: 'Lỗi tải dữ liệu Báo giá để xuất PDF' });
+    const pdfBuffer = await pdfService.generateQuotationPdf(quotation);
+
+    // 3. Gọi thư viện Gửi Email
+    await sendQuotationEmail(khRows[0].email, khRows[0].ten_cong_ty, id, pdfBuffer);
+
+    // 4. Tự động chuyển trạng thái thành ĐÃ GỬI (SENT)
+    await Quotation.updateStatus(id, 'SENT');
+
+    res.json({ success: true, message: 'Đã gửi Email đính kèm Báo giá thành công!' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Lỗi khi gửi email: ' + error.message });
+  }
+};
+
+// 🚀 FIX: Nhớ Export hàm mới ra để file Routes có thể gọi được
+module.exports = { 
+  analyzeZaloText, getQuotations, getQuotationById, createQuotation, updateQuotation, 
+  sendQuotation, confirmQuotation, rejectQuotation, deleteQuotation, exportPdf,
+  sendQuotationEmailController 
+};

@@ -35,14 +35,14 @@ const tinhCuocBooking = (bk, masterData) => {
         const donGiaGoc = bangGia?.don_gia_goc_kg || 0;
         const minCharge = bangGia?.cuoc_toi_thieu || 0;
         const heSoChietKhau = masterData.chietKhauLTLs?.find(d => Number(d.moc_tu_kg) <= totalCW && Number(d.moc_den_kg) >= totalCW)?.he_so_chiet_khau || 1.0;
-        
+
         items.forEach(item => {
             if (!item) return;
             const heSoGia = masterData.loaiHangs?.find(l => Number(l.id) === Number(item.loaiHangId))?.he_so_gia || 1.0;
             // 🚀 FIX: Cập nhật lại cách tính quy đổi
-            let quyDoi = (item.thuocTinhChiTiet?.dai_cm && item.thuocTinhChiTiet?.rong_cm && item.thuocTinhChiTiet?.cao_cm) 
-                        ? (Number(item.thuocTinhChiTiet.dai_cm) * Number(item.thuocTinhChiTiet.rong_cm) * Number(item.thuocTinhChiTiet.cao_cm)) / 5000 * (Number(item.soLuong) || 1) 
-                        : 0;
+            let quyDoi = (item.thuocTinhChiTiet?.dai_cm && item.thuocTinhChiTiet?.rong_cm && item.thuocTinhChiTiet?.cao_cm)
+                ? (Number(item.thuocTinhChiTiet.dai_cm) * Number(item.thuocTinhChiTiet.rong_cm) * Number(item.thuocTinhChiTiet.cao_cm)) / 5000 * (Number(item.soLuong) || 1)
+                : 0;
             const cw = Math.max(Number(item.trongLuongThucTe) || 0, quyDoi);
             cuocChinh += Number(donGiaGoc) * cw * Number(heSoGia) * Number(heSoChietKhau);
         });
@@ -106,7 +106,7 @@ const BaoGiaDetail = () => {
     const isB2B = selectedKhachHang?.loai_khach === 'B2B_DOANH_NGHIEP';
     const currentDebt = Number(selectedKhachHang?.tong_no_hien_tai) || 0;
     const debtLimit = Number(selectedKhachHang?.han_muc_no_toi_da) || 0;
-    
+
     // Vượt công nợ khi: Nợ Cũ + Giá Trị Báo Giá Này > Hạn Mức
     const isVuotHanMuc = isB2B && debtLimit > 0 && ((currentDebt + totalEstimation) > debtLimit);
 
@@ -250,7 +250,7 @@ const BaoGiaDetail = () => {
 
     const onFinish = async (values) => {
         if (bookings.length === 0) return message.warning('Chưa có chuyến xe nào!');
-        
+
         // 🚀 BỨC TƯỜNG THÉP CHẶN LẠI TRƯỚC KHI LƯU
         if (isVuotHanMuc) {
             return message.error(`Không thể lưu! Báo giá này sẽ làm khách hàng vượt hạn mức công nợ cho phép. Vui lòng yêu cầu thanh toán trước!`);
@@ -333,7 +333,7 @@ const BaoGiaDetail = () => {
                                     <Form.Item label="Khách hàng" name="khachHangId" rules={[{ required: true }]} style={{ marginBottom: isB2B ? 8 : 24 }}>
                                         <Select showSearch filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())} options={masterData.khachHangs.map(kh => ({ value: kh.id, label: kh.ten_cong_ty }))} />
                                     </Form.Item>
-                                    
+
                                     {/* 🚀 KHỐI CẢNH BÁO TỰ ĐỘNG BẬT/TẮT NẾU LÀ KHÁCH B2B */}
                                     {isB2B && (
                                         <div style={{ marginBottom: 16, padding: '8px 12px', borderRadius: 6, backgroundColor: isVuotHanMuc ? '#fff2f0' : '#f6ffed', border: `1px solid ${isVuotHanMuc ? '#ffccc7' : '#b7eb8f'}` }}>
@@ -345,7 +345,7 @@ const BaoGiaDetail = () => {
                                             </div>
                                             {isVuotHanMuc && (
                                                 <div style={{ color: '#cf1322', marginTop: 8, fontSize: 13, fontWeight: 500, backgroundColor: '#fff', padding: '6px 8px', borderRadius: 4, border: '1px dashed #cf1322' }}>
-                                                    ⚠️ Chú ý: Báo giá này có giá trị <b><CurrencyText value={totalEstimation}/></b>. Nếu chốt sẽ làm vượt hạn mức nợ <b><CurrencyText value={(currentDebt + totalEstimation) - debtLimit}/></b>. Hệ thống đang khóa nút Lưu!
+                                                    ⚠️ Chú ý: Báo giá này có giá trị <b><CurrencyText value={totalEstimation} /></b>. Nếu chốt sẽ làm vượt hạn mức nợ <b><CurrencyText value={(currentDebt + totalEstimation) - debtLimit} /></b>. Hệ thống đang khóa nút Lưu!
                                                 </div>
                                             )}
                                         </div>
@@ -395,11 +395,22 @@ const BaoGiaDetail = () => {
 
                                             <Button size="large" icon={<SendOutlined style={{ color: '#eb2f96' }} />} onClick={async () => {
                                                 try {
-                                                    message.loading({ content: 'Đang gửi email...', key: 'send_email' });
-                                                    await baoGiaService.guiEmail(id);
+                                                    message.loading({ content: 'Đang chuẩn bị và gửi email...', key: 'send_email' });
+
+                                                    // 🚀 FIX 1: Đổi guiEmail thành sendEmail cho đồng bộ với vanDonService
+                                                    // (Nếu file baoGiaService.js của bạn vẫn dùng chữ guiEmail thì bạn tự đổi lại nhé)
+                                                    await baoGiaService.sendEmail(id);
+
                                                     message.success({ content: 'Đã gửi Email báo giá kèm PDF cho khách!', key: 'send_email' });
                                                 } catch (error) {
-                                                    message.error({ content: 'Gửi Email thất bại', key: 'send_email' });
+                                                    // 🚀 FIX 2: Bóc tách LỖI THẬT từ Backend trả về để biết tại sao tạch
+                                                    const errorMsg = error?.response?.data?.error?.message
+                                                        || error?.response?.data?.message
+                                                        || error?.message
+                                                        || 'Lỗi Server chưa xác định';
+
+                                                    message.error({ content: `Gửi thất bại: ${errorMsg}`, key: 'send_email', duration: 5 });
+                                                    console.error("LỖI GỬI EMAIL:", error);
                                                 }
                                             }}>Gửi Email Khách Hàng</Button>
 
